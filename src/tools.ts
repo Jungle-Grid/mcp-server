@@ -1,0 +1,556 @@
+import {
+  CallToolRequestSchema,
+  ListToolsRequestSchema,
+} from "@modelcontextprotocol/sdk/types.js";
+import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import * as client from "./client.js";
+import type { SubmitJobInput } from "./types.js";
+
+const { gpuNames } = require("@jungle-grid/gpu-registry") as { gpuNames: string[] };
+const GPU_TYPE_ENUM = [...gpuNames];
+
+function text(content: string): CallToolResult {
+  return { content: [{ type: "text" as const, text: content }] };
+}
+
+export function formatToolError(toolName: string, err: unknown): string {
+  const detail = err instanceof Error && err.message
+    ? err.message
+    : typeof err === "string" && err.trim()
+      ? err.trim()
+      : "unknown error";
+  return `${toolName} failed: ${detail}`;
+}
+
+function errorText(toolName: string, err: unknown): CallToolResult {
+  return {
+    ...text(formatToolError(toolName, err)),
+    isError: true,
+  };
+}
+
+function formatJob(job: {
+  job_id: string;
+  status: string;
+  workload_type?: string;
+  image?: string;
+  gpu_type?: string;
+  gpu_class?: string;
+  region_preference?: string;
+  region_mode?: string;
+  constraints_relaxed?: boolean;
+  reasoning?: string;
+  created_at?: string;
+  started_at?: string;
+  completed_at?: string;
+  status_reason?: string;
+}): string {
+  const lines = [
+    `id:               ${job.job_id}`,
+    `status:           ${job.status}`,
+    `workload_type:    ${job.workload_type ?? "-"}`,
+  ];
+  if (job.image) lines.push(`image:            ${job.image}`);
+  if (job.gpu_type) lines.push(`gpu_type:         ${job.gpu_type}`);
+  if (job.gpu_class) lines.push(`gpu_class:        ${job.gpu_class}`);
+  if (job.region_preference) lines.push(`region:           ${job.region_preference}`);
+  if (job.region_mode) lines.push(`region_mode:      ${job.region_mode}`);
+  if (job.constraints_relaxed !== undefined)
+    lines.push(`constraints_relaxed: ${job.constraints_relaxed}`);
+  if (job.reasoning) lines.push(`scheduling:       ${job.reasoning}`);
+  if (job.created_at) lines.push(`created_at:       ${job.created_at}`);
+  if (job.started_at) lines.push(`started_at:       ${job.started_at}`);
+  if (job.completed_at) lines.push(`completed_at:     ${job.completed_at}`);
+  if (job.status_reason) lines.push(`reason:           ${job.status_reason}`);
+  return lines.join("\n");
+}
+
+function normalizeCommand(value: unknown): { command: string; args: string[] | undefined } {
+  if (!Array.isArray(value)) {
+    throw new Error("submit_job command must be a non-empty array of strings.");
+  }
+
+  const parts = value.map((item) => {
+    if (typeof item !== "string") {
+      throw new Error("submit_job command must contain only strings.");
+    }
+    return item.trim();
+  }).filter((item) => item !== "");
+
+  if (parts.length === 0) {
+    throw new Error("submit_job command must be a non-empty array of strings.");
+  }
+
+  return {
+    command: parts[0],
+    args: parts.length > 1 ? parts.slice(1) : undefined,
+  };
+}
+
+function defaultJobName(workloadType: unknown): string {
+  const workload = typeof workloadType === "string" && workloadType.trim() !== ""
+    ? workloadType.trim().toLowerCase().replace(/[^a-z0-9-]+/g, "-")
+    : "job";
+  const timestamp = new Date().toISOString().replace(/[-:TZ.]/g, "").slice(0, 14);
+  return `mcp-${workload}-${timestamp}`;
+}
+
+export function buildSubmitJobInput(args: Record<string, unknown>): SubmitJobInput {
+  const command = normalizeCommand(args.command);
+  const constraints = {
+    gpu_type: args.gpu_type as string | undefined,
+    gpu_class: args.gpu_class as SubmitJobInput["constraints"] extends infer C
+      ? C extends { gpu_class?: infer G }
+        ? G
+        : never
+      : never,
+    region_preference: args.region_preference as string | undefined,
+    region_mode: args.region_mode as SubmitJobInput["constraints"] extends infer C
+      ? C extends { region_mode?: infer R }
+        ? R
+        : never
+      : never,
+    latency_priority: args.latency_priority as SubmitJobInput["latency_priority"],
+    cost_priority: args.cost_priority as SubmitJobInput["cost_priority"],
+  };
+
+  const rawName = typeof args.name === "string" ? args.name.trim() : "";
+  return {
+    name: rawName || defaultJobName(args.workload_type),
+    workload_type: args.workload_type as SubmitJobInput["workload_type"],
+    image: args.image as string,
+    command: command.command,
+    args: command.args,
+    model_size_gb: args.model_size_gb as number | undefined,
+    disk_gb: args.disk_gb as number | undefined,
+    optimize_for: args.optimize_for as SubmitJobInput["optimize_for"],
+    latency_priority: args.latency_priority as SubmitJobInput["latency_priority"],
+    cost_priority: args.cost_priority as SubmitJobInput["cost_priority"],
+    environment: args.environment as Record<string, string> | undefined,
+    huggingface_credential_id: args.huggingface_credential_id as string | undefined,
+    webhook_url: args.webhook_url as string | undefined,
+    constraints:
+      Object.values(constraints).some((value) => value !== undefined && value !== "")
+        ? constraints
+        : undefined,
+  };
+}
+
+export const TOOLS = [
+  {
+    name: "submit_job",
+    description:
+      "Submit a GPU workload to Jungle Grid. Returns a job_id immediately — the job runs asynchronously. " +
+      "Supports environment variables for runtime configuration or env-backed code payloads when the command would be too long. " +
+      "After submitting, prefer stream_job_logs for real-time output, then use get_job or get_job_logs for final status and logs. " +
+      "Managed jobs automatically upload regular files written under /workspace/artifacts as Jungle Grid artifacts. " +
+      "Use estimate_job first if you want a cost estimate before committing.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: {
+          type: "string",
+          description: "Optional readable job name. A name is generated if omitted.",
+        },
+        workload_type: {
+          type: "string",
+          enum: ["inference", "training", "fine-tuning", "batch"],
+          description: "Type of GPU workload.",
+        },
+        image: {
+          type: "string",
+          description: "Docker image to run (e.g. 'pytorch/pytorch:2.2.0-cuda12.1-cudnn8-runtime').",
+        },
+        command: {
+          type: "array",
+          items: { type: "string" },
+          description: "Container entrypoint arguments (e.g. ['python', 'train.py', '--epochs', '10']).",
+        },
+        model_size_gb: {
+          type: "number",
+          description: "Approximate model size in GB. Used to select the right GPU tier for inference jobs.",
+        },
+        disk_gb: {
+          type: "number",
+          description: "Optional managed-provider local disk override in GB. Leave unset to let Jungle Grid auto-size from model_size_gb.",
+        },
+        optimize_for: {
+          type: "string",
+          enum: ["balanced", "cost", "speed"],
+          description: "Scheduling optimization goal. 'speed' prioritises latency; 'cost' minimises spend.",
+        },
+        latency_priority: {
+          type: "string",
+          enum: ["low", "balanced", "high"],
+          description: "Latency sensitivity. Use 'high' for real-time inference.",
+        },
+        cost_priority: {
+          type: "string",
+          enum: ["low", "balanced", "high"],
+          description: "Cost sensitivity.",
+        },
+        gpu_type: {
+          type: "string",
+          enum: GPU_TYPE_ENUM,
+          description: "Optional exact GPU override.",
+        },
+        gpu_class: {
+          type: "string",
+          enum: ["consumer", "datacenter"],
+          description: "Optional soft GPU class preference.",
+        },
+        region_preference: {
+          type: "string",
+          description: "Optional preferred region such as us-east or eu-west.",
+        },
+        region_mode: {
+          type: "string",
+          enum: ["prefer", "strict"],
+          description: "Region preference mode.",
+        },
+        environment: {
+          type: "object",
+          additionalProperties: { type: "string" },
+          description: "Environment variables injected into the container. Use this for large inline scripts such as CODE when you want to keep the command array short.",
+        },
+        huggingface_credential_id: {
+          type: "string",
+          description: "Optional saved Hugging Face credential to inject into the managed runtime. Falls back to your account default when omitted.",
+        },
+        webhook_url: {
+          type: "string",
+          description: "Optional HTTPS URL to receive signed lifecycle event callbacks.",
+        },
+      },
+      required: ["workload_type", "image", "command"],
+    },
+  },
+  {
+    name: "get_job",
+    description:
+      "Get the current status and full detail of a Jungle Grid job by its ID. " +
+      "Poll this after submit_job to track progress. Terminal statuses are 'completed', 'failed', and 'cancelled'.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        job_id: { type: "string", description: "The job ID returned by submit_job." },
+      },
+      required: ["job_id"],
+    },
+  },
+  {
+    name: "list_jobs",
+    description: "List recent Jungle Grid jobs for the authenticated user, newest first.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        limit: {
+          type: "number",
+          description: "Maximum number of jobs to return (default 20, max 100).",
+        },
+        status: {
+          type: "string",
+          enum: ["pending", "queued", "running", "completed", "failed", "cancelled"],
+          description: "Filter by job status.",
+        },
+      },
+    },
+  },
+  {
+    name: "cancel_job",
+    description: "Cancel a pending, queued, or running Jungle Grid job. Has no effect on already-terminal jobs.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        job_id: { type: "string", description: "The ID of the job to cancel." },
+        reason: { type: "string", description: "Optional cancellation reason." },
+      },
+      required: ["job_id"],
+    },
+  },
+  {
+    name: "get_job_logs",
+    description:
+      "Retrieve the stdout and stderr output of a completed or running Jungle Grid job. " +
+      "Call this after get_job reports status 'completed' or 'failed'.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        job_id: { type: "string", description: "The job ID to fetch logs for." },
+      },
+      required: ["job_id"],
+    },
+  },
+  {
+    name: "list_job_artifacts",
+    description:
+      "List managed result artifacts uploaded by a Jungle Grid job. " +
+      "For managed jobs, Jungle Grid automatically uploads regular files written under /workspace/artifacts.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        job_id: { type: "string", description: "The job ID to inspect." },
+      },
+      required: ["job_id"],
+    },
+  },
+  {
+    name: "get_artifact_download_url",
+    description: "Create a temporary signed download URL for a managed job artifact.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        job_id: { type: "string", description: "The job ID that owns the artifact." },
+        artifact_id: { type: "string", description: "The artifact ID returned by list_job_artifacts." },
+      },
+      required: ["job_id", "artifact_id"],
+    },
+  },
+  {
+    name: "estimate_job",
+    description:
+      "Estimate the credit cost and GPU tier for a job before submitting it. " +
+      "Use this to check affordability or compare optimize_for options before calling submit_job.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        workload_type: {
+          type: "string",
+          enum: ["inference", "training", "fine-tuning", "batch"],
+        },
+        image: { type: "string", description: "Docker image to run." },
+        model_size_gb: {
+          type: "number",
+          description: "Approximate model size in GB — drives tier selection.",
+        },
+        disk_gb: {
+          type: "number",
+          description: "Optional managed-provider local disk override in GB. Leave unset to let Jungle Grid auto-size from model_size_gb.",
+        },
+        optimize_for: {
+          type: "string",
+          enum: ["balanced", "cost", "speed"],
+        },
+        latency_priority: {
+          type: "string",
+          enum: ["low", "balanced", "high"],
+        },
+        cost_priority: {
+          type: "string",
+          enum: ["low", "balanced", "high"],
+        },
+        gpu_type: {
+          type: "string",
+          enum: GPU_TYPE_ENUM,
+        },
+        gpu_class: {
+          type: "string",
+          enum: ["consumer", "datacenter"],
+        },
+        region_preference: {
+          type: "string",
+        },
+        region_mode: {
+          type: "string",
+          enum: ["prefer", "strict"],
+        },
+      },
+      required: ["workload_type", "image"],
+    },
+  },
+  {
+    name: "stream_job_logs",
+    description:
+      "Stream live log output for a running or recently completed job. " +
+      "Blocks until the job reaches a terminal state (completed/failed/cancelled) or 10 minutes elapses. " +
+      "Returns the full stdout and stderr accumulated during the run. " +
+      "Prefer this over get_job_logs for jobs that are actively running or when you want a real-time execution view.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        job_id: {
+          type: "string",
+          description: "The job ID to stream logs for.",
+        },
+        timeout_seconds: {
+          type: "number",
+          description: "Maximum seconds to wait for job completion (default 600, max 600).",
+        },
+      },
+      required: ["job_id"],
+    },
+  },
+];
+
+export function registerTools(
+  server: Server,
+  apiKey: string,
+  baseUrl: string,
+): void {
+  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));
+
+  server.setRequestHandler(CallToolRequestSchema, async (req) => {
+    const args = (req.params.arguments ?? {}) as Record<string, unknown>;
+    const toolName = req.params.name;
+
+    try {
+      switch (toolName) {
+      case "submit_job": {
+        const input = buildSubmitJobInput(args);
+        const result = await client.submitJob(baseUrl, apiKey, input);
+        const freeTrialLine = result.free_inference_trial_applied
+          ? `\nfree_trial:       applied (${result.free_inference_jobs_remaining ?? 0} remaining before completion)`
+          : "";
+        return text(
+          `Job submitted.\nid:               ${result.job_id}\nstatus:           ${result.status}\nqueued_at:        ${result.queued_at}${freeTrialLine}\n\nPoll get_job with id=${result.job_id} to track progress.`,
+        );
+      }
+
+      case "get_job": {
+        const job = await client.getJob(baseUrl, apiKey, args.job_id as string);
+        return text(formatJob(job));
+      }
+
+      case "list_jobs": {
+        const res = await client.listJobs(
+          baseUrl,
+          apiKey,
+          (args.limit as number | undefined) ?? 20,
+          args.status as string | undefined,
+        );
+        if (res.jobs.length === 0) return text("No jobs found.");
+        const lines = res.jobs.map(
+          (j) => `${j.job_id}  ${j.status.padEnd(10)}  ${(j.workload_type ?? "-").padEnd(12)}  ${(j.created_at ?? "-")}`,
+        );
+        return text(`${res.jobs.length} job(s):\n\n${lines.join("\n")}`);
+      }
+
+      case "cancel_job": {
+        await client.cancelJob(
+          baseUrl,
+          apiKey,
+          args.job_id as string,
+          args.reason as string | undefined,
+        );
+        return text(`Job ${args.job_id as string} cancellation requested.`);
+      }
+
+      case "get_job_logs": {
+        const runtime = await client.getJobLogs(baseUrl, apiKey, args.job_id as string);
+        const parts: string[] = [];
+        if (runtime.stdout_tail?.trim()) parts.push(`--- stdout ---\n${runtime.stdout_tail}`);
+        if (runtime.stderr_tail?.trim()) parts.push(`--- stderr ---\n${runtime.stderr_tail}`);
+        if (runtime.exit_code !== undefined) {
+          parts.push(`exit_code: ${runtime.exit_code}`);
+        } else if (runtime.runtime_availability?.exit_code?.reason) {
+          parts.push(`exit_code: ${runtime.runtime_availability.exit_code.reason}`);
+        }
+        if (!runtime.stdout_tail?.trim() && runtime.runtime_availability?.stdout_tail?.reason) {
+          parts.push(`stdout: ${runtime.runtime_availability.stdout_tail.reason}`);
+        }
+        if (!runtime.stderr_tail?.trim() && runtime.runtime_availability?.stderr_tail?.reason) {
+          parts.push(`stderr: ${runtime.runtime_availability.stderr_tail.reason}`);
+        }
+        if (runtime.diagnostics && runtime.diagnostics.length > 0) {
+          parts.push(`diagnostics:\n- ${runtime.diagnostics.join("\n- ")}`);
+        }
+        return text(parts.length > 0 ? parts.join("\n\n") : "No output available yet.");
+      }
+
+      case "list_job_artifacts": {
+        const res = await client.listJobArtifacts(baseUrl, apiKey, args.job_id as string);
+        if (res.artifacts.length === 0) return text("No managed artifacts uploaded for this job yet.");
+        return text(
+          res.artifacts
+            .map((artifact) => `${artifact.artifact_id}  ${artifact.status}  ${artifact.filename}  ${artifact.size_bytes} bytes`)
+            .join("\n"),
+        );
+      }
+
+      case "get_artifact_download_url": {
+        const res = await client.getJobArtifactDownloadURL(
+          baseUrl,
+          apiKey,
+          args.job_id as string,
+          args.artifact_id as string,
+        );
+        return text(
+          `artifact_id: ${res.artifact.artifact_id}\nfilename:    ${res.artifact.filename}\nexpires_at:  ${res.expires_at}\nurl:         ${res.url}`,
+        );
+      }
+
+      case "estimate_job": {
+        const est = await client.estimateJob(baseUrl, apiKey, {
+          workload_type: args.workload_type as SubmitJobInput["workload_type"],
+          image: args.image as string,
+          model_size_gb: args.model_size_gb as number | undefined,
+          disk_gb: args.disk_gb as number | undefined,
+          optimize_for: args.optimize_for as SubmitJobInput["optimize_for"],
+          latency_priority: args.latency_priority as SubmitJobInput["latency_priority"],
+          cost_priority: args.cost_priority as SubmitJobInput["cost_priority"],
+          constraints:
+            Object.values({
+              gpu_type: args.gpu_type,
+              gpu_class: args.gpu_class,
+              region_preference: args.region_preference,
+              region_mode: args.region_mode,
+            }).some((value) => value !== undefined && value !== "")
+              ? {
+                  gpu_type: args.gpu_type as string | undefined,
+                  gpu_class: args.gpu_class as "consumer" | "datacenter" | undefined,
+                  region_preference: args.region_preference as string | undefined,
+                  region_mode: args.region_mode as "prefer" | "strict" | undefined,
+                }
+              : undefined,
+        });
+        const freeTrialLine =
+          typeof est.free_inference_jobs_remaining === "number" && est.free_inference_jobs_remaining > 0
+            ? `\nfree_trial:         ${est.free_inference_trial_eligible ? "qualifies" : `over ${est.free_inference_trial_max_cost_usd ?? 0.5} USD cap; wallet required`} (${est.free_inference_jobs_remaining} remaining)`
+            : "";
+        const warningBlock =
+          est.warnings && est.warnings.length > 0
+            ? `\nwarnings:\n- ${est.warnings.join("\n- ")}`
+            : "";
+        return text(
+          `Estimate:\navailable:          ${est.available}\ngpu_tier:           ${est.routed_gpu_tier ?? "-"}\nlikely_gpu:         ${est.likely_gpu_type ?? "-"}\nestimated_cost:     ${est.estimated_cost_usd ?? 0} USD\nruntime_minutes:    ${est.estimated_runtime_min_minutes}-${est.estimated_runtime_max_minutes}\nconstraints_relaxed:${est.constraints_relaxed_applied ?? false}\nunavailable_code:   ${est.unavailable_code ?? "-"}${freeTrialLine}${warningBlock}`,
+        );
+      }
+
+      case "stream_job_logs": {
+        const jobId = args.job_id as string;
+        const timeoutMs = Math.min(
+          ((args.timeout_seconds as number | undefined) ?? 600) * 1000,
+          600_000,
+        );
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), timeoutMs);
+        try {
+          const logs = await client.streamJobLogs(baseUrl, apiKey, jobId, controller.signal);
+          const parts: string[] = [];
+          if (logs.stdout.trim()) parts.push(`--- stdout ---\n${logs.stdout}`);
+          if (logs.stderr.trim()) parts.push(`--- stderr ---\n${logs.stderr}`);
+          if (logs.exitCode !== null) parts.push(`exit_code: ${logs.exitCode}`);
+          if (logs.timedOut) parts.push("(job timed out on the server)");
+          return text(parts.length > 0 ? parts.join("\n\n") : "Job completed with no output.");
+        } catch (err) {
+          if ((err as Error)?.name === "AbortError") {
+            return text(`Streaming timed out after ${timeoutMs / 1000}s. Use get_job_logs to retrieve any available output.`);
+          }
+          throw err;
+        } finally {
+          clearTimeout(timer);
+        }
+      }
+
+      default:
+        throw new Error(`Unknown tool: ${toolName}`);
+      }
+    } catch (err) {
+      if (TOOLS.some((tool) => tool.name === toolName)) {
+        return errorText(toolName, err);
+      }
+      throw err;
+    }
+  });
+}
