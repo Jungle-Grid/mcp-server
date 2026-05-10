@@ -186,3 +186,19 @@ npm publish --access public
   `["@jungle-grid/mcp@0.1.0"]`, or clear the npx cache.
 - API calls fail: confirm the key is valid and `JUNGLE_GRID_API_URL` points to
   the orchestrator you intend to use.
+
+
+## Contributors wanted
+
+We are opening up the Jungle Grid MCP server for contributors interested in AI agents, MCP, developer tools, and workload execution.
+
+Good first areas:
+
+- Improve docs
+- Add example prompts
+- Add tests for MCP tool handlers
+- Add Docker support
+- Improve GitHub Actions
+- Build integration examples
+
+Start with issues labeled `good first issue`.
