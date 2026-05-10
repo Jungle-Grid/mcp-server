@@ -202,3 +202,6 @@ Good first areas:
 - Build integration examples
 
 Start with issues labeled `good first issue`.
+
+
+[![mcp-server MCP server](https://glama.ai/mcp/servers/Jungle-Grid/mcp-server/badges/score.svg)](https://glama.ai/mcp/servers/Jungle-Grid/mcp-server)
