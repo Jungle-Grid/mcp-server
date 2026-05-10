@@ -17,3 +17,14 @@
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist"]
 }
+
+
+
+cd /home/invinc/code/junglegrid
+git subtree split --prefix=packages/mcp-server -b mcp-server-only
+
+cd /home/invinc/code
+git clone --single-branch --branch mcp-server-only /home/invinc/code/junglegrid junglegrid-mcp-server
+
+cd /home/invinc/code/junglegrid-mcp-server
+git branch -m main
