@@ -1,0 +1,30 @@
+name: Documentation improvement
+description: Suggest a missing example, clarification, or docs correction.
+title: "[Docs]: "
+labels:
+  - documentation
+body:
+  - type: input
+    id: page
+    attributes:
+      label: Page or file
+      placeholder: README.md, CONTRIBUTING.md, examples/prompts.md
+    validations:
+      required: true
+  - type: input
+    id: mcp_host
+    attributes:
+      label: MCP host
+      placeholder: Optional if the docs issue is integration-specific
+  - type: textarea
+    id: gap
+    attributes:
+      label: What is missing or unclear?
+    validations:
+      required: true
+  - type: textarea
+    id: proposed
+    attributes:
+      label: Suggested improvement
+    validations:
+      required: true

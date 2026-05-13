@@ -1,0 +1,34 @@
+name: Feature request
+description: Propose a new MCP workflow, tool enhancement, or packaging improvement.
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: input
+    id: package_version
+    attributes:
+      label: Package version
+      placeholder: 0.1.8
+  - type: input
+    id: mcp_host
+    attributes:
+      label: MCP host
+      placeholder: Claude Desktop, Cursor, Windsurf, custom client
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem to solve
+    validations:
+      required: true
+  - type: textarea
+    id: proposed
+    attributes:
+      label: Proposed behavior
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered

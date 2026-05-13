@@ -152,15 +152,46 @@ upload URLs or call artifact completion endpoints manually.
 
 ```sh
 npm install
+cp .env.example .env
 npm run build
-JUNGLE_GRID_API_KEY=jg_... node dist/index.js
+source .env
+node dist/index.js
 ```
 
 Inspect the server with MCP Inspector:
 
 ```sh
-JUNGLE_GRID_API_KEY=jg_... npx @modelcontextprotocol/inspector node dist/index.js
+source .env
+npx @modelcontextprotocol/inspector node dist/index.js
 ```
+
+If you do not want to use `source .env`, export the variables manually before
+launching the server.
+
+## Example Prompts
+
+See [examples/prompts.md](examples/prompts.md) for copy-paste prompts that work
+well in MCP-aware hosts.
+
+## Docker
+
+Build the container:
+
+```sh
+docker build -t junglegrid-mcp .
+```
+
+Run the MCP server over stdio with your API key injected at launch:
+
+```sh
+docker run --rm -i \
+  -e JUNGLE_GRID_API_KEY=jg_... \
+  -e JUNGLE_GRID_API_URL=https://api.junglegrid.dev \
+  junglegrid-mcp
+```
+
+The container exits immediately with a clear error when
+`JUNGLE_GRID_API_KEY` is missing.
 
 ## Publishing
 
@@ -202,6 +233,8 @@ Good first areas:
 - Build integration examples
 
 Start with issues labeled `good first issue`.
+
+Contributor workflow details live in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 
 [![mcp-server MCP server](https://glama.ai/mcp/servers/Jungle-Grid/mcp-server/badges/score.svg)](https://glama.ai/mcp/servers/Jungle-Grid/mcp-server)

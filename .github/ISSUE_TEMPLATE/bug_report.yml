@@ -1,0 +1,52 @@
+name: Bug report
+description: Report a runtime, API, or MCP integration bug.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: input
+    id: package_version
+    attributes:
+      label: Package version
+      placeholder: 0.1.8
+    validations:
+      required: true
+  - type: input
+    id: mcp_host
+    attributes:
+      label: MCP host
+      placeholder: Claude Desktop 0.x, Cursor x.x, Windsurf x.x
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      placeholder: macOS 15, Ubuntu 24.04, Windows 11
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+      placeholder: 1. Configure server ... 2. Call tool ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: config
+    attributes:
+      label: Relevant config or logs
+      description: Remove secrets before pasting.
+      placeholder: JUNGLE_GRID_API_URL=..., MCP config JSON, error output
