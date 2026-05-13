@@ -3,14 +3,13 @@
   "version": "0.1.8",
   "description": "MCP server for Jungle Grid - submit and manage GPU workloads from any MCP-aware AI host",
   "license": "MIT",
-  "homepage": "https://github.com/dejaguarkyng/junglegrid#readme",
+  "homepage": "https://github.com/Jungle-Grid/mcp-server#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/dejaguarkyng/junglegrid.git",
-    "directory": "packages/mcp-server"
+    "url": "git+https://github.com/Jungle-Grid/mcp-server.git"
   },
   "bugs": {
-    "url": "https://github.com/dejaguarkyng/junglegrid/issues"
+    "url": "https://github.com/Jungle-Grid/mcp-server/issues"
   },
   "keywords": [
     "jungle-grid",
@@ -28,7 +27,7 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
-    "test": "npm run build && node --test dist/client.test.js dist/config.test.js",
+    "test": "npm run build && node --test dist/client.test.js dist/config.test.js dist/tools.test.js dist/index.test.js",
     "prepublishOnly": "npm run build",
     "start": "node dist/index.js"
   },

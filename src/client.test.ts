@@ -1,39 +1,55 @@
 import assert from "node:assert/strict";
-import http from "node:http";
 import { test } from "node:test";
-import type { AddressInfo } from "node:net";
 import { getJob, streamJobLogs } from "./client.js";
 import { buildSubmitJobInput, formatToolError, TOOLS } from "./tools.js";
 
-function listen(server: http.Server): Promise<string> {
-  return new Promise((resolve) => {
-    server.listen(0, "127.0.0.1", () => {
-      const address = server.address() as AddressInfo;
-      resolve(`http://127.0.0.1:${address.port}`);
-    });
-  });
+function withMockedFetch<T>(
+  implementation: typeof fetch,
+  run: () => Promise<T> | T,
+): Promise<T> | T {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = implementation;
+
+  try {
+    const result = run();
+    if (result instanceof Promise) {
+      return result.finally(() => {
+        globalThis.fetch = originalFetch;
+      });
+    }
+    globalThis.fetch = originalFetch;
+    return result;
+  } catch (error) {
+    globalThis.fetch = originalFetch;
+    throw error;
+  }
 }
 
 test("REST requests surface nested API error envelopes", async () => {
-  const server = http.createServer((_req, res) => {
-    res.writeHead(403, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({
-      error: {
-        code: "FORBIDDEN",
-        message: "api key missing jobs:read or jobs:write scope",
-      },
-    }));
-  });
-  const baseUrl = await listen(server);
-
-  try {
-    await assert.rejects(
-      () => getJob(baseUrl, "jg_test", "job-1"),
-      /GET \/v1\/jobs\/job-1 failed with status 403: FORBIDDEN: api key missing jobs:read or jobs:write scope/,
-    );
-  } finally {
-    server.close();
-  }
+  await withMockedFetch(
+    async (input, init) => {
+      assert.equal(String(input), "https://api.junglegrid.dev/v1/jobs/job-1");
+      assert.equal(init?.method, "GET");
+      return new Response(
+        JSON.stringify({
+          error: {
+            code: "FORBIDDEN",
+            message: "api key missing jobs:read or jobs:write scope",
+          },
+        }),
+        {
+          status: 403,
+          headers: { "Content-Type": "application/json" },
+        },
+      );
+    },
+    async () => {
+      await assert.rejects(
+        () => getJob("https://api.junglegrid.dev", "jg_test", "job-1"),
+        /GET \/v1\/jobs\/job-1 failed with status 403: FORBIDDEN: api key missing jobs:read or jobs:write scope/,
+      );
+    },
+  );
 });
 
 test("MCP tool errors include tool name and API detail", () => {
@@ -92,48 +108,57 @@ test("submit_job rejects empty command arrays locally", () => {
 });
 
 test("SSE requests surface nested API error envelopes", async () => {
-  const server = http.createServer((_req, res) => {
-    res.writeHead(401, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({
-      error: {
-        code: "UNAUTHORIZED",
-        message: "invalid or revoked api key",
-      },
-    }));
-  });
-  const baseUrl = await listen(server);
   const controller = new AbortController();
 
-  try {
-    await assert.rejects(
-      () => streamJobLogs(baseUrl, "jg_test", "job-1", controller.signal),
-      /GET \/v1\/jobs\/job-1\/logs\/live failed with status 401: UNAUTHORIZED: invalid or revoked api key/,
-    );
-  } finally {
-    controller.abort();
-    server.close();
-  }
+  await withMockedFetch(
+    async (input, init) => {
+      assert.equal(String(input), "https://api.junglegrid.dev/v1/jobs/job-1/logs/live");
+      assert.equal(init?.headers instanceof Headers, false);
+      return new Response(
+        JSON.stringify({
+          error: {
+            code: "UNAUTHORIZED",
+            message: "invalid or revoked api key",
+          },
+        }),
+        {
+          status: 401,
+          headers: { "Content-Type": "application/json" },
+        },
+      );
+    },
+    async () => {
+      await assert.rejects(
+        () => streamJobLogs("https://api.junglegrid.dev", "jg_test", "job-1", controller.signal),
+        /GET \/v1\/jobs\/job-1\/logs\/live failed with status 401: UNAUTHORIZED: invalid or revoked api key/,
+      );
+    },
+  );
 });
 
 test("streamJobLogs accumulates API message chunks", async () => {
-  const server = http.createServer((_req, res) => {
-    res.writeHead(200, { "Content-Type": "text/event-stream" });
-    res.write('event: stdout\ndata: {"message":"hello\\n"}\n\n');
-    res.write('event: stderr\ndata: {"message":"warn\\n"}\n\n');
-    res.write('event: terminal\ndata: {"exit_code":0,"timed_out":false}\n\n');
-    res.end();
-  });
-  const baseUrl = await listen(server);
   const controller = new AbortController();
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode('event: stdout\ndata: {"message":"hello\\n"}\n\n'));
+      controller.enqueue(new TextEncoder().encode('event: stderr\ndata: {"message":"warn\\n"}\n\n'));
+      controller.enqueue(new TextEncoder().encode('event: terminal\ndata: {"exit_code":0,"timed_out":false}\n\n'));
+      controller.close();
+    },
+  });
 
-  try {
-    const logs = await streamJobLogs(baseUrl, "jg_test", "job-1", controller.signal);
-    assert.equal(logs.stdout, "hello\n");
-    assert.equal(logs.stderr, "warn\n");
-    assert.equal(logs.exitCode, 0);
-    assert.equal(logs.timedOut, false);
-  } finally {
-    controller.abort();
-    server.close();
-  }
+  await withMockedFetch(
+    async () =>
+      new Response(stream, {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" },
+      }),
+    async () => {
+      const logs = await streamJobLogs("https://api.junglegrid.dev", "jg_test", "job-1", controller.signal);
+      assert.equal(logs.stdout, "hello\n");
+      assert.equal(logs.stderr, "warn\n");
+      assert.equal(logs.exitCode, 0);
+      assert.equal(logs.timedOut, false);
+    },
+  );
 });
