@@ -55,7 +55,8 @@ function bearerFromExtra(extra?: Pick<HandlerExtra, "authInfo" | "requestInfo">)
   if (extra?.authInfo?.token?.trim()) return extra.authInfo.token.trim();
 
   const headers = extra?.requestInfo?.headers;
-  const authorization = headers?.get("authorization") ?? headers?.get("Authorization");
+  const rawAuthorization = headers?.authorization ?? headers?.Authorization;
+  const authorization = Array.isArray(rawAuthorization) ? rawAuthorization[0] : rawAuthorization;
   if (!authorization) return undefined;
   const match = authorization.match(/^Bearer\s+(.+)$/i);
   return match?.[1]?.trim() || undefined;

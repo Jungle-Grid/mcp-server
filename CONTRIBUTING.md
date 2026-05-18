@@ -19,8 +19,9 @@ docs.
    cp .env.example .env
    ```
 
-4. Set `JUNGLE_GRID_API_KEY` in `.env`. Leave `JUNGLE_GRID_API_URL` on the
-   default unless you are testing against a different orchestrator.
+4. Set `JUNGLEGRID_API_BASE` in `.env` if you are testing against a different
+   Jungle Grid API. For hosted HTTP testing, set `JUNGLEGRID_INTERNAL_SERVICE_TOKEN`
+   unless your MCP client sends a user Bearer token.
 5. Build the server:
 
    ```sh
@@ -31,7 +32,7 @@ docs.
 
    ```sh
    source .env
-   node dist/index.js
+   node dist/index.js --http
    ```
 
 To inspect the server interactively:

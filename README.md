@@ -1,240 +1,130 @@
 # Jungle Grid MCP Server
 
-Run Jungle Grid GPU workloads from MCP-aware AI hosts such as Claude Desktop,
-Cursor, Windsurf, and MCP Inspector.
+Thin MCP gateway for Jungle Grid. The server exposes agent-facing tools for
+ChatGPT, Cursor, Claude, and other MCP clients, then forwards all real work to
+the main Jungle Grid API.
 
-The server runs locally over stdio and forwards tool calls to the Jungle Grid
-REST API with your API key.
+This repo does not schedule jobs, choose providers, calculate billing, or store
+artifacts. Those responsibilities stay in the Jungle Grid API.
 
-## Requirements
+## Endpoints
 
-- Node.js 18 or newer
-- A Jungle Grid API key
-- Optional: `JUNGLE_GRID_API_URL` for a self-hosted orchestrator
+- `POST /mcp` - MCP Streamable HTTP endpoint
+- `GET /healthz` - health check
 
-For the full submit workflow, the API key needs `jobs:write`. That scope allows
-estimate, submit, polling, cancellation, and logs for jobs owned by the key's
-account. `list_jobs` still requires `jobs:read`.
+Production URL:
 
-## Quick Start
+```text
+https://mcp.junglegrid.dev/mcp
+```
+
+## Environment
 
 ```sh
-JUNGLE_GRID_API_KEY=jg_... npx -y @jungle-grid/mcp
+PORT=3000
+JUNGLEGRID_API_BASE=https://api.junglegrid.dev
+JUNGLEGRID_INTERNAL_SERVICE_TOKEN=...
+NODE_ENV=production
 ```
 
-On Windows PowerShell:
+`JUNGLEGRID_INTERNAL_SERVICE_TOKEN` is optional. When an incoming MCP request has
+`Authorization: Bearer ...`, that user token is forwarded to the Jungle Grid API.
+If no user token is present, the internal service token is used as a temporary
+fallback. Tokens are never hardcoded and must not be logged.
 
-```powershell
-$env:JUNGLE_GRID_API_KEY = "jg_..."
-npx -y @jungle-grid/mcp
-```
+Legacy aliases are still accepted for stdio compatibility:
 
-The server uses stdio, so a successful manual launch appears to wait for MCP
-messages. If `JUNGLE_GRID_API_KEY` is missing, it exits with a clear error.
-
-## Claude Desktop
-
-Add this to `claude_desktop_config.json`, then fully restart Claude Desktop.
-
-```json
-{
-  "mcpServers": {
-    "junglegrid": {
-      "command": "npx",
-      "args": ["-y", "@jungle-grid/mcp"],
-      "env": {
-        "JUNGLE_GRID_API_KEY": "jg_..."
-      }
-    }
-  }
-}
-```
-
-Windows config path:
-
-```text
-%APPDATA%\Claude\claude_desktop_config.json
-```
-
-macOS config path:
-
-```text
-~/Library/Application Support/Claude/claude_desktop_config.json
-```
-
-## Cursor or Project MCP Config
-
-For a checked-in project config, avoid committing secrets. Put the API key in
-the environment used to launch Cursor and keep the config secret-free.
-
-```json
-{
-  "mcpServers": {
-    "junglegrid": {
-      "command": "npx",
-      "args": ["-y", "@jungle-grid/mcp"]
-    }
-  }
-}
-```
-
-For a local, uncommitted config, you can include the key directly:
-
-```json
-{
-  "mcpServers": {
-    "junglegrid": {
-      "command": "npx",
-      "args": ["-y", "@jungle-grid/mcp"],
-      "env": {
-        "JUNGLE_GRID_API_KEY": "jg_..."
-      }
-    }
-  }
-}
-```
-
-## Self-Hosted Orchestrator
-
-`JUNGLE_GRID_API_URL` defaults to
-`https://api.junglegrid.dev`. Override it when your host should
-call a different orchestrator.
-
-```json
-{
-  "mcpServers": {
-    "junglegrid": {
-      "command": "npx",
-      "args": ["-y", "@jungle-grid/mcp"],
-      "env": {
-        "JUNGLE_GRID_API_KEY": "jg_...",
-        "JUNGLE_GRID_API_URL": "https://your-orchestrator.example.com"
-      }
-    }
-  }
-}
-```
-
-## Tools
-
-- `estimate_job`: estimate GPU tier, region, duration, and credit cost.
-- `submit_job`: submit an asynchronous GPU workload with optional `environment` values.
-- `get_job`: fetch current job status and details.
-- `list_jobs`: list recent jobs for the authenticated account.
-- `cancel_job`: cancel a pending, queued, or running job.
-- `get_job_logs`: fetch stdout, stderr, and exit information.
-- `stream_job_logs`: stream live logs until completion or timeout.
-- `list_job_artifacts`: list managed artifacts uploaded for a job.
-- `get_artifact_download_url`: create a signed download URL for one managed artifact.
-
-## Real-Time Job Pattern
-
-Use `submit_job` to start work, `stream_job_logs` for live output, then
-`list_job_artifacts` after completion to retrieve saved files.
-
-```json
-{
-  "command": ["python", "-c", "import os; exec(os.environ['CODE'])"],
-  "environment": {
-    "CODE": "import os, json\nos.makedirs('/workspace/artifacts', exist_ok=True)\nwith open('/workspace/artifacts/output.json','w') as f:\n    json.dump({'status':'ok'}, f)"
-  }
-}
-```
-
-This is the recommended pattern when the real Python payload is too long to fit
-comfortably in the `command` array.
-
-For managed jobs, Jungle Grid automatically creates `/workspace/artifacts` and
-uploads any regular files written there. Users do not need to create signed
-upload URLs or call artifact completion endpoints manually.
+- `JUNGLE_GRID_API_URL` as an alias for `JUNGLEGRID_API_BASE`
+- `JUNGLE_GRID_API_KEY` as a final auth fallback for local stdio use
 
 ## Local Development
 
 ```sh
 npm install
-cp .env.example .env
+npm test
 npm run build
-source .env
-node dist/index.js
 ```
 
-Inspect the server with MCP Inspector:
+Run the hosted HTTP server:
 
 ```sh
-source .env
-npx @modelcontextprotocol/inspector node dist/index.js
+JUNGLEGRID_API_BASE=https://api.junglegrid.dev \
+JUNGLEGRID_INTERNAL_SERVICE_TOKEN=... \
+npm start
 ```
 
-If you do not want to use `source .env`, export the variables manually before
-launching the server.
+Then check:
 
-## Example Prompts
+```sh
+curl http://localhost:3000/healthz
+```
 
-See [examples/prompts.md](examples/prompts.md) for copy-paste prompts that work
-well in MCP-aware hosts.
+## MCP Tools
+
+- `estimate_job` - read-only estimate or execution-plan preparation.
+- `submit_job` - starts real Jungle Grid compute and may cost money.
+- `get_job` - read-only job state lookup.
+- `get_job_logs` - read-only recent log fetch.
+- `cancel_job` - real cancellation action that may stop running compute.
+- `list_artifacts` - read-only managed artifact listing.
+- `get_artifact` - creates a temporary signed artifact download URL.
+
+All tools return a useful text summary and preserve the raw Jungle Grid API
+response in `structuredContent.data`.
+
+## Connecting Clients
+
+For hosted MCP clients that support Streamable HTTP, use:
+
+```text
+https://mcp.junglegrid.dev/mcp
+```
+
+Configure the client to send a Jungle Grid user Bearer token when available. If
+the client cannot send user auth yet, deploy the server with
+`JUNGLEGRID_INTERNAL_SERVICE_TOKEN` until user-scoped OAuth or account linking is
+available.
+
+## Claude Desktop / Cursor Stdio Compatibility
+
+The package still supports local stdio mode for existing MCP host configs. The
+bin defaults to stdio; `npm start` and Docker use HTTP mode.
+
+Claude Desktop example:
+
+```json
+{
+  "mcpServers": {
+    "junglegrid": {
+      "command": "npx",
+      "args": ["-y", "@jungle-grid/mcp"],
+      "env": {
+        "JUNGLEGRID_API_BASE": "https://api.junglegrid.dev",
+        "JUNGLE_GRID_API_KEY": "jg_..."
+      }
+    }
+  }
+}
+```
+
+For Cursor project configs, avoid committing secrets. Put the token in the
+environment used to launch Cursor and keep checked-in config secret-free.
 
 ## Docker
 
-Build the container:
-
 ```sh
 docker build -t junglegrid-mcp .
-```
-
-Run the MCP server over stdio with your API key injected at launch:
-
-```sh
-docker run --rm -i \
-  -e JUNGLE_GRID_API_KEY=jg_... \
-  -e JUNGLE_GRID_API_URL=https://api.junglegrid.dev \
+docker run --rm -p 3000:3000 \
+  -e PORT=3000 \
+  -e JUNGLEGRID_API_BASE=https://api.junglegrid.dev \
+  -e JUNGLEGRID_INTERNAL_SERVICE_TOKEN=... \
   junglegrid-mcp
 ```
 
-The container exits immediately with a clear error when
-`JUNGLE_GRID_API_KEY` is missing.
-
 ## Publishing
-
-Verify the package before publishing:
 
 ```sh
 npm run build
 npm pack --dry-run
-```
-
-Publish the scoped package publicly:
-
-```sh
 npm publish --access public
 ```
-
-## Troubleshooting
-
-- `JUNGLE_GRID_API_KEY environment variable is required`: add the key to the
-  host config `env` block or to the environment that launches the host.
-- Tools do not appear: fully quit and reopen the MCP host after editing config.
-- Old package version: pin a version in config, for example
-  `["@jungle-grid/mcp@0.1.0"]`, or clear the npx cache.
-- API calls fail: confirm the key is valid and `JUNGLE_GRID_API_URL` points to
-  the orchestrator you intend to use.
-
-
-## Contributors wanted
-
-We are opening up the Jungle Grid MCP server for contributors interested in AI agents, MCP, developer tools, and workload execution.
-
-Good first areas:
-
-- Improve docs
-- Add example prompts
-- Add tests for MCP tool handlers
-- Add Docker support
-- Improve GitHub Actions
-- Build integration examples
-
-Start with issues labeled `good first issue`.
-
-Contributor workflow details live in [CONTRIBUTING.md](CONTRIBUTING.md).
-
-
-[![mcp-server MCP server](https://glama.ai/mcp/servers/Jungle-Grid/mcp-server/badges/score.svg)](https://glama.ai/mcp/servers/Jungle-Grid/mcp-server)

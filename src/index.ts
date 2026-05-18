@@ -26,34 +26,42 @@ export async function startStdioServer(env: NodeJS.ProcessEnv = process.env): Pr
 }
 
 export function createHttpServer(config: GatewayConfig): HttpServer {
-  return createServer(async (req, res) => {
-    try {
-      if (req.method === "GET" && req.url === "/healthz") {
-        writeJson(res, 200, {
-          ok: true,
-          service: SERVER_NAME,
-          version: SERVER_VERSION,
-          env: config.nodeEnv,
-        });
-        return;
-      }
-
-      if (req.url?.split("?")[0] === "/mcp") {
-        await handleMcpRequest(config, req, res);
-        return;
-      }
-
-      writeJson(res, 404, { error: { code: "NOT_FOUND", message: "Not found." } });
-    } catch {
-      if (!res.headersSent) {
-        writeJson(res, 500, {
-          jsonrpc: "2.0",
-          error: { code: -32603, message: "Internal server error" },
-          id: null,
-        });
-      }
-    }
+  return createServer((req, res) => {
+    void handleHttpRequest(config, req, res);
   });
+}
+
+export async function handleHttpRequest(
+  config: GatewayConfig,
+  req: IncomingMessage,
+  res: ServerResponse,
+): Promise<void> {
+  try {
+    if (req.method === "GET" && req.url === "/healthz") {
+      writeJson(res, 200, {
+        ok: true,
+        service: SERVER_NAME,
+        version: SERVER_VERSION,
+        env: config.nodeEnv,
+      });
+      return;
+    }
+
+    if (req.url?.split("?")[0] === "/mcp") {
+      await handleMcpRequest(config, req, res);
+      return;
+    }
+
+    writeJson(res, 404, { error: { code: "NOT_FOUND", message: "Not found." } });
+  } catch {
+    if (!res.headersSent) {
+      writeJson(res, 500, {
+        jsonrpc: "2.0",
+        error: { code: -32603, message: "Internal server error" },
+        id: null,
+      });
+    }
+  }
 }
 
 export async function startHttpServer(env: NodeJS.ProcessEnv = process.env): Promise<HttpServer> {

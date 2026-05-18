@@ -1,10 +1,68 @@
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import test from "node:test";
-import { MISSING_API_KEY_MESSAGE, requireApiKey } from "./index.js";
+import { handleHttpRequest, SERVER_NAME, SERVER_VERSION } from "./index";
+import type { GatewayConfig } from "./config";
 
-test("requireApiKey throws a clear error when JUNGLE_GRID_API_KEY is missing", () => {
-  assert.throws(
-    () => requireApiKey({}),
-    new Error(MISSING_API_KEY_MESSAGE),
-  );
+const config: GatewayConfig = {
+  apiBase: "https://api.junglegrid.dev",
+  internalServiceToken: "service-token",
+  nodeEnv: "test",
+  port: 0,
+};
+
+class MockResponse extends EventEmitter {
+  statusCode = 0;
+  headers: Record<string, string> = {};
+  body = "";
+  headersSent = false;
+
+  writeHead(statusCode: number, headers: Record<string, string>): this {
+    this.statusCode = statusCode;
+    this.headers = headers;
+    this.headersSent = true;
+    return this;
+  }
+
+  end(body?: string): this {
+    this.body = body ?? "";
+    this.emit("finish");
+    return this;
+  }
+}
+
+async function invoke(method: string, url: string): Promise<MockResponse> {
+  const req = Object.assign(new EventEmitter(), { method, url });
+  const res = new MockResponse();
+  await handleHttpRequest(config, req as never, res as never);
+  return res;
+}
+
+test("GET /healthz returns gateway health", async () => {
+  const response = await invoke("GET", "/healthz");
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(JSON.parse(response.body), {
+    ok: true,
+    service: SERVER_NAME,
+    version: SERVER_VERSION,
+    env: "test",
+  });
+});
+
+test("unknown routes return 404 JSON", async () => {
+  const response = await invoke("GET", "/missing");
+  assert.equal(response.statusCode, 404);
+  assert.deepEqual(JSON.parse(response.body), {
+    error: { code: "NOT_FOUND", message: "Not found." },
+  });
+});
+
+test("GET /mcp returns method not allowed", async () => {
+  const response = await invoke("GET", "/mcp");
+  assert.equal(response.statusCode, 405);
+  assert.deepEqual(JSON.parse(response.body), {
+    jsonrpc: "2.0",
+    error: { code: -32000, message: "Method not allowed." },
+    id: null,
+  });
 });

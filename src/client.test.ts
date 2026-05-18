@@ -90,7 +90,12 @@ test("Jungle Grid client hides non-JSON upstream error bodies", async () => {
     async () => {
       await assert.rejects(
         () => api.getJob("job-1"),
-        /UPSTREAM_ERROR: Jungle Grid API is temporarily unavailable/,
+        (err) => {
+          assert.ok(err instanceof JungleGridApiError);
+          assert.equal(err.code, "UPSTREAM_ERROR");
+          assert.equal(err.message, "Jungle Grid API is temporarily unavailable.");
+          return true;
+        },
       );
     },
   );

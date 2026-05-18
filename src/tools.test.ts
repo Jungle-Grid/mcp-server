@@ -1,0 +1,238 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import {
+  CallToolRequestSchema,
+  ListToolsRequestSchema,
+} from "@modelcontextprotocol/sdk/types.js";
+import * as client from "./client";
+import {
+  buildEstimateInput,
+  buildSubmitInput,
+  formatToolError,
+  registerTools,
+  resolveBearerToken,
+  TOOLS,
+} from "./tools";
+import type { GatewayConfig } from "./config";
+
+type Handler = (request: unknown, extra?: unknown) => Promise<unknown>;
+
+class FakeServer {
+  handlers = new Map<unknown, Handler>();
+
+  setRequestHandler(schema: unknown, handler: Handler): void {
+    this.handlers.set(schema, handler);
+  }
+}
+
+const config: GatewayConfig = {
+  apiBase: "https://api.junglegrid.dev",
+  internalServiceToken: "service-token",
+  nodeEnv: "test",
+  port: 3000,
+};
+
+function createRegisteredServer(): FakeServer {
+  const server = new FakeServer();
+  registerTools(server as never, config);
+  return server;
+}
+
+async function callTool(
+  server: FakeServer,
+  name: string,
+  args: Record<string, unknown> = {},
+  bearer = "user-token",
+): Promise<{ content: Array<{ type: string; text: string }>; structuredContent?: Record<string, unknown>; isError?: boolean }> {
+  const handler = server.handlers.get(CallToolRequestSchema);
+  assert.ok(handler, "call tool handler should be registered");
+
+  return handler(
+    {
+      params: {
+        name,
+        arguments: args,
+      },
+    },
+    {
+      requestInfo: {
+        headers: { authorization: `Bearer ${bearer}` },
+      },
+      requestId: 1,
+      signal: new AbortController().signal,
+    },
+  ) as Promise<{ content: Array<{ type: string; text: string }>; structuredContent?: Record<string, unknown>; isError?: boolean }>;
+}
+
+function withMockedClient<T>(
+  factory: typeof client.createJungleGridClient,
+  run: () => Promise<T> | T,
+): Promise<T> | T {
+  const original = client.createJungleGridClient;
+  (client as Record<string, unknown>).createJungleGridClient = factory;
+
+  try {
+    const result = run();
+    if (result instanceof Promise) {
+      return result.finally(() => {
+        (client as Record<string, unknown>).createJungleGridClient = original;
+      });
+    }
+    (client as Record<string, unknown>).createJungleGridClient = original;
+    return result;
+  } catch (error) {
+    (client as Record<string, unknown>).createJungleGridClient = original;
+    throw error;
+  }
+}
+
+test("tool discovery exposes the gateway tool surface", async () => {
+  const server = createRegisteredServer();
+  const handler = server.handlers.get(ListToolsRequestSchema);
+  assert.ok(handler, "list tools handler should be registered");
+
+  const response = await handler({});
+  assert.deepEqual(response, { tools: TOOLS });
+  assert.deepEqual(TOOLS.map((tool) => tool.name), [
+    "estimate_job",
+    "submit_job",
+    "get_job",
+    "get_job_logs",
+    "cancel_job",
+    "list_artifacts",
+    "get_artifact",
+  ]);
+});
+
+test("resolveBearerToken prefers incoming user auth over fallback tokens", () => {
+  assert.equal(
+    resolveBearerToken(
+      { internalServiceToken: "service-token", legacyApiKey: "legacy-key" },
+      { requestInfo: { headers: { authorization: "Bearer user-token" } } },
+    ),
+    "user-token",
+  );
+  assert.equal(resolveBearerToken({ internalServiceToken: "service-token" }, undefined), "service-token");
+  assert.equal(resolveBearerToken({ legacyApiKey: "legacy-key" }, undefined), "legacy-key");
+  assert.throws(() => resolveBearerToken({}, undefined), /Authentication is required/);
+});
+
+test("estimate_job maps gateway inputs to the Jungle Grid API payload", () => {
+  assert.deepEqual(
+    buildEstimateInput({
+      workload: "fine_tuning",
+      model_size: 7,
+      image: "pytorch/pytorch:2.2.0-cuda12.1-cudnn8-runtime",
+      command: "python",
+      args: ["train.py"],
+      routing_mode: "cost",
+      template: "lora",
+      notes: "cheap route",
+    }),
+    {
+      workload_type: "fine-tuning",
+      model_size_gb: 7,
+      image: "pytorch/pytorch:2.2.0-cuda12.1-cudnn8-runtime",
+      command: "python",
+      args: ["train.py"],
+      optimize_for: "cost",
+      template: "lora",
+      notes: "cheap route",
+    },
+  );
+});
+
+test("submit_job maps gateway inputs to the Jungle Grid API payload", () => {
+  assert.deepEqual(
+    buildSubmitInput({
+      name: "mnist-train",
+      workload: "training",
+      image: "pytorch/pytorch:2.2.0-cuda12.1-cudnn8-runtime",
+      command: "python",
+      args: ["train.py"],
+      env: { EPOCHS: "3" },
+      routing_mode: "balanced",
+      metadata: { source: "mcp" },
+    }),
+    {
+      name: "mnist-train",
+      workload_type: "training",
+      image: "pytorch/pytorch:2.2.0-cuda12.1-cudnn8-runtime",
+      command: "python",
+      args: ["train.py"],
+      environment: { EPOCHS: "3" },
+      optimize_for: "balanced",
+      metadata: { source: "mcp" },
+    },
+  );
+});
+
+test("submit_job handler returns text plus structured API data", async () => {
+  const server = createRegisteredServer();
+
+  await withMockedClient(
+    (apiBase, token) => {
+      assert.equal(apiBase, "https://api.junglegrid.dev");
+      assert.equal(token, "user-token");
+      return {
+        submitJob: async (input: unknown) => {
+          assert.deepEqual(input, {
+            name: "batch-1",
+            workload_type: "batch",
+            image: "python:3.11-slim",
+          });
+          return { job_id: "job_123", status: "queued" };
+        },
+      } as never;
+    },
+    async () => {
+      const response = await callTool(server, "submit_job", {
+        name: "batch-1",
+        workload: "batch",
+        image: "python:3.11-slim",
+      });
+
+      assert.equal(response.isError, undefined);
+      assert.match(response.content[0]?.text, /real compute may start/);
+      assert.deepEqual(response.structuredContent, { data: { job_id: "job_123", status: "queued" } });
+    },
+  );
+});
+
+test("get_job_logs validates and forwards pagination options", async () => {
+  const server = createRegisteredServer();
+
+  await withMockedClient(
+    () => ({
+      getJobLogs: async (jobId: string, options?: { limit?: number; cursor?: string | number }) => {
+        assert.equal(jobId, "job_123");
+        assert.deepEqual(options, { limit: 1000, cursor: "abc" });
+        return { job_id: "job_123", items: [{ message: "hello" }], next_cursor: 2 };
+      },
+    } as never),
+    async () => {
+      const response = await callTool(server, "get_job_logs", {
+        jobId: "job_123",
+        limit: 5000,
+        cursor: "abc",
+      });
+
+      assert.equal(response.content[0]?.text, "Fetched 1 log entry. next_cursor=2.");
+    },
+  );
+});
+
+test("known tool errors are returned as MCP tool errors", async () => {
+  const server = createRegisteredServer();
+  const response = await callTool(server, "get_job", { jobId: "" });
+
+  assert.equal(response.isError, true);
+  assert.equal(response.content[0]?.text, "get_job failed: jobId is required.");
+});
+
+test("MCP API errors include sanitized code and message", () => {
+  assert.equal(
+    formatToolError("get_job", new client.JungleGridApiError(403, "FORBIDDEN", "api key missing jobs:read scope")),
+    "get_job failed: FORBIDDEN: api key missing jobs:read scope",
+  );
+});
