@@ -10,6 +10,7 @@ artifacts. Those responsibilities stay in the Jungle Grid API.
 ## Endpoints
 
 - `POST /mcp` - MCP Streamable HTTP endpoint
+- `GET /.well-known/oauth-protected-resource` - OAuth protected resource metadata
 - `GET /healthz` - health check
 
 Production URL:
@@ -24,13 +25,17 @@ https://mcp.junglegrid.dev/mcp
 PORT=3000
 JUNGLEGRID_API_BASE=https://api.junglegrid.dev
 JUNGLEGRID_INTERNAL_SERVICE_TOKEN=...
+OAUTH_ISSUER=https://api.junglegrid.dev
+MCP_RESOURCE=https://mcp.junglegrid.dev
+MCP_RESOURCE_METADATA_URL=https://mcp.junglegrid.dev/.well-known/oauth-protected-resource
 NODE_ENV=production
 ```
 
-`JUNGLEGRID_INTERNAL_SERVICE_TOKEN` is optional. When an incoming MCP request has
-`Authorization: Bearer ...`, that user token is forwarded to the Jungle Grid API.
-If no user token is present, the internal service token is used as a temporary
-fallback. Tokens are never hardcoded and must not be logged.
+Hosted HTTP MCP requires `Authorization: Bearer <OAuth access token>`. The server
+introspects that token with the Jungle Grid API, enforces tool scopes, and
+forwards the user token to the API. `JUNGLEGRID_INTERNAL_SERVICE_TOKEN` is used
+only for MCP-to-API introspection and other internal server-to-server calls; it
+is not used as the ChatGPT user identity.
 
 Legacy aliases are still accepted for stdio compatibility:
 
@@ -80,10 +85,9 @@ For hosted MCP clients that support Streamable HTTP, use:
 https://mcp.junglegrid.dev/mcp
 ```
 
-Configure the client to send a Jungle Grid user Bearer token when available. If
-the client cannot send user auth yet, deploy the server with
-`JUNGLEGRID_INTERNAL_SERVICE_TOKEN` until user-scoped OAuth or account linking is
-available.
+ChatGPT and other hosted clients should discover auth from
+`/.well-known/oauth-protected-resource`, connect the user's Jungle Grid account,
+and then send the OAuth access token as `Authorization: Bearer ...`.
 
 ## Claude Desktop / Cursor Stdio Compatibility
 
