@@ -5,6 +5,7 @@ import {
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import type { RequestHandlerExtra } from "@modelcontextprotocol/sdk/shared/protocol.js";
+import { hasScope, TOOL_SCOPES, type McpAuthContext } from "./auth.js";
 import * as client from "./client.js";
 import type { GatewayConfig } from "./config.js";
 
@@ -62,8 +63,8 @@ function bearerFromExtra(extra?: Pick<HandlerExtra, "authInfo" | "requestInfo">)
   return match?.[1]?.trim() || undefined;
 }
 
-function apiClient(config: GatewayConfig, extra: HandlerExtra): client.JungleGridClient {
-  return client.createJungleGridClient(config.apiBase, resolveBearerToken(config, extra));
+function apiClient(config: GatewayConfig, extra: HandlerExtra, auth?: McpAuthContext): client.JungleGridClient {
+  return client.createJungleGridClient(config.apiBase, auth?.token ?? resolveBearerToken(config, extra));
 }
 
 function optionalString(args: ToolArgs, key: string): string | undefined {
@@ -331,7 +332,7 @@ export const TOOLS = [
   },
 ];
 
-export function registerTools(server: Server, config: GatewayConfig): void {
+export function registerTools(server: Server, config: GatewayConfig, auth?: McpAuthContext): void {
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));
 
   server.setRequestHandler(CallToolRequestSchema, async (req, extra) => {
@@ -339,7 +340,14 @@ export function registerTools(server: Server, config: GatewayConfig): void {
     const toolName = req.params.name;
 
     try {
-      const api = apiClient(config, extra as HandlerExtra);
+      if (auth) {
+        const requiredScope = TOOL_SCOPES[toolName];
+        if (!requiredScope) throw new Error(`Tool is not available with OAuth: ${toolName}`);
+        if (!hasScope(auth, requiredScope)) {
+          throw new client.JungleGridApiError(403, "FORBIDDEN", `OAuth token missing required scope: ${requiredScope}`);
+        }
+      }
+      const api = apiClient(config, extra as HandlerExtra, auth);
       switch (toolName) {
       case "estimate_job": {
         const data = await api.estimateJob(buildEstimateInput(args));

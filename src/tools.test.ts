@@ -13,6 +13,7 @@ import {
   resolveBearerToken,
   TOOLS,
 } from "./tools";
+import type { McpAuthContext } from "./auth";
 import type { GatewayConfig } from "./config";
 
 type Handler = (request: unknown, extra?: unknown) => Promise<unknown>;
@@ -28,13 +29,16 @@ class FakeServer {
 const config: GatewayConfig = {
   apiBase: "https://api.junglegrid.dev",
   internalServiceToken: "service-token",
+  oauthIssuer: "https://api.junglegrid.dev",
+  resource: "https://mcp.junglegrid.dev",
+  resourceMetadataUrl: "https://mcp.junglegrid.dev/.well-known/oauth-protected-resource",
   nodeEnv: "test",
   port: 3000,
 };
 
-function createRegisteredServer(): FakeServer {
+function createRegisteredServer(auth?: McpAuthContext): FakeServer {
   const server = new FakeServer();
-  registerTools(server as never, config);
+  registerTools(server as never, config, auth);
   return server;
 }
 
@@ -228,6 +232,37 @@ test("known tool errors are returned as MCP tool errors", async () => {
 
   assert.equal(response.isError, true);
   assert.equal(response.content[0]?.text, "get_job failed: jobId is required.");
+});
+
+test("OAuth tool calls require the tool scope and forward the OAuth token", async () => {
+  const server = createRegisteredServer({
+    token: "oauth-token",
+    userId: "user_1",
+    workspaceId: "wsp_1",
+    scopes: ["jobs:read"],
+  });
+
+  await withMockedClient(
+    (_apiBase, token) => {
+      assert.equal(token, "oauth-token");
+      return {
+        getJob: async () => ({ job_id: "job_123", status: "queued" }),
+      } as never;
+    },
+    async () => {
+      const allowed = await callTool(server, "get_job", { jobId: "job_123" }, "ignored-user-token");
+      assert.equal(allowed.isError, undefined);
+      assert.deepEqual(allowed.structuredContent, { data: { job_id: "job_123", status: "queued" } });
+
+      const denied = await callTool(server, "submit_job", {
+        name: "batch-1",
+        workload: "batch",
+        image: "python:3.11-slim",
+      });
+      assert.equal(denied.isError, true);
+      assert.match(denied.content[0]?.text, /missing required scope: jobs:submit/);
+    },
+  );
 });
 
 test("MCP API errors include sanitized code and message", () => {

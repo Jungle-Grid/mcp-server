@@ -28,13 +28,13 @@ export function createJungleGridClient(
 
   return {
     estimateJob(input) {
-      return request("POST", "/v1/jobs/estimate", input);
+      return request("POST", "/v1/mcp/jobs/estimate", input);
     },
     submitJob(input) {
-      return request("POST", "/v1/jobs", input);
+      return request("POST", "/v1/mcp/jobs", input);
     },
     getJob(jobId) {
-      return request("GET", `/v1/jobs/${encodeURIComponent(jobId)}`);
+      return request("GET", `/v1/mcp/jobs/${encodeURIComponent(jobId)}`);
     },
     getJobLogs(jobId, options = {}) {
       const params = new URLSearchParams();
@@ -43,20 +43,20 @@ export function createJungleGridClient(
         params.set("cursor", String(options.cursor).trim());
       }
       const suffix = params.size > 0 ? `?${params.toString()}` : "";
-      return request("GET", `/v1/jobs/${encodeURIComponent(jobId)}/logs${suffix}`);
+      return request("GET", `/v1/mcp/jobs/${encodeURIComponent(jobId)}/logs${suffix}`);
     },
     cancelJob(jobId, reason) {
-      return request("POST", `/v1/jobs/${encodeURIComponent(jobId)}/cancel`, {
+      return request("POST", `/v1/mcp/jobs/${encodeURIComponent(jobId)}/cancel`, {
         reason: reason?.trim() || "Cancelled via MCP",
       });
     },
     listArtifacts(jobId) {
-      return request("GET", `/v1/jobs/${encodeURIComponent(jobId)}/artifacts`);
+      return request("GET", `/v1/mcp/jobs/${encodeURIComponent(jobId)}/artifacts`);
     },
     getArtifact(jobId, artifactId) {
       return request(
         "POST",
-        `/v1/jobs/${encodeURIComponent(jobId)}/artifacts/${encodeURIComponent(artifactId)}/download`,
+        `/v1/mcp/jobs/${encodeURIComponent(jobId)}/artifacts/${encodeURIComponent(artifactId)}/download`,
       );
     },
   };
@@ -86,7 +86,7 @@ async function apiRequest<T>(
     throw toApiError(res.status, data);
   }
 
-  return data as T;
+  return unwrapMcpEnvelope(data) as T;
 }
 
 async function readJson(res: Response): Promise<unknown> {
@@ -125,6 +125,15 @@ function parseApiError(data: unknown): { code?: string; message?: string } {
     code: cleanString(record.code),
     message: cleanString(record.message),
   };
+}
+
+function unwrapMcpEnvelope(data: unknown): unknown {
+  if (!data || typeof data !== "object" || Array.isArray(data)) return data;
+  const record = data as Record<string, unknown>;
+  if (record.ok === true && Object.prototype.hasOwnProperty.call(record, "data")) {
+    return record.data;
+  }
+  return data;
 }
 
 function cleanString(value: unknown): string | undefined {

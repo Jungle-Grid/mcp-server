@@ -29,7 +29,7 @@ test("Jungle Grid client forwards Bearer auth and JSON bodies", async () => {
 
   await withMockedFetch(
     async (input, init) => {
-      assert.equal(String(input), "https://api.junglegrid.dev/v1/jobs/estimate");
+      assert.equal(String(input), "https://api.junglegrid.dev/v1/mcp/jobs/estimate");
       assert.equal(init?.method, "POST");
       assert.equal((init?.headers as Record<string, string>).Authorization, "Bearer token-123");
       assert.equal(init?.body, JSON.stringify({ workload_type: "batch" }));
@@ -48,12 +48,23 @@ test("Jungle Grid client encodes path and query parameters", async () => {
     async (input) => {
       assert.equal(
         String(input),
-        "https://api.junglegrid.dev/v1/jobs/job%201/logs?limit=50&cursor=cursor-1",
+        "https://api.junglegrid.dev/v1/mcp/jobs/job%201/logs?limit=50&cursor=cursor-1",
       );
       return Response.json({ items: [] });
     },
     async () => {
       assert.deepEqual(await api.getJobLogs("job 1", { limit: 50, cursor: "cursor-1" }), { items: [] });
+    },
+  );
+});
+
+test("Jungle Grid client unwraps MCP API envelopes", async () => {
+  const api = createJungleGridClient("https://api.junglegrid.dev", "token-123");
+
+  await withMockedFetch(
+    async () => Response.json({ ok: true, data: { job_id: "job-1", status: "queued" } }),
+    async () => {
+      assert.deepEqual(await api.getJob("job-1"), { job_id: "job-1", status: "queued" });
     },
   );
 });
