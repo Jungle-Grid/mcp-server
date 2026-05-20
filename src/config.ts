@@ -1,10 +1,16 @@
 export const DEFAULT_API_BASE = "https://api.junglegrid.dev";
+export const DEFAULT_OAUTH_ISSUER = "https://api.junglegrid.dev";
+export const DEFAULT_MCP_RESOURCE = "https://mcp.junglegrid.dev";
+export const DEFAULT_MCP_RESOURCE_METADATA_URL = "https://mcp.junglegrid.dev/.well-known/oauth-protected-resource";
 export const DEFAULT_PORT = 3000;
 
 export interface GatewayConfig {
   apiBase: string;
   internalServiceToken?: string;
   legacyApiKey?: string;
+  oauthIssuer: string;
+  resource: string;
+  resourceMetadataUrl: string;
   nodeEnv: string;
   port: number;
 }
@@ -28,11 +34,17 @@ export function resolvePort(env: NodeJS.ProcessEnv = process.env): number {
 export function resolveGatewayConfig(env: NodeJS.ProcessEnv = process.env): GatewayConfig {
   const internalServiceToken = (env.JUNGLEGRID_INTERNAL_SERVICE_TOKEN ?? "").trim() || undefined;
   const legacyApiKey = (env.JUNGLE_GRID_API_KEY ?? "").trim() || undefined;
+  const oauthIssuer = ((env.OAUTH_ISSUER ?? "").trim() || DEFAULT_OAUTH_ISSUER).replace(/\/+$/, "");
+  const resource = ((env.MCP_RESOURCE ?? "").trim() || DEFAULT_MCP_RESOURCE).replace(/\/+$/, "");
+  const resourceMetadataUrl = (env.MCP_RESOURCE_METADATA_URL ?? "").trim() || DEFAULT_MCP_RESOURCE_METADATA_URL;
 
   return {
     apiBase: resolveApiBase(env),
     internalServiceToken,
     legacyApiKey,
+    oauthIssuer,
+    resource,
+    resourceMetadataUrl,
     nodeEnv: (env.NODE_ENV ?? "development").trim() || "development",
     port: resolvePort(env),
   };

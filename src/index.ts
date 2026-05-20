@@ -3,18 +3,19 @@ import { createServer, type IncomingMessage, type Server as HttpServer, type Ser
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { authenticateMcpRequest, writeOAuthChallenge, type McpAuthContext } from "./auth.js";
 import { resolveGatewayConfig, type GatewayConfig } from "./config.js";
 import { registerTools } from "./tools.js";
 
 export const SERVER_NAME = "junglegrid";
 export const SERVER_VERSION = "0.1.8";
 
-export function createMcpServer(config: GatewayConfig): Server {
+export function createMcpServer(config: GatewayConfig, auth?: McpAuthContext): Server {
   const server = new Server(
     { name: SERVER_NAME, version: SERVER_VERSION },
     { capabilities: { tools: {} } },
   );
-  registerTools(server, config);
+  registerTools(server, config, auth);
   return server;
 }
 
@@ -43,6 +44,21 @@ export async function handleHttpRequest(
         service: SERVER_NAME,
         version: SERVER_VERSION,
         env: config.nodeEnv,
+      });
+      return;
+    }
+
+    if (req.method === "GET" && req.url === "/.well-known/oauth-protected-resource") {
+      writeJson(res, 200, {
+        resource: config.resource,
+        authorization_servers: [config.oauthIssuer],
+        scopes_supported: [
+          "jobs:estimate",
+          "jobs:submit",
+          "jobs:read",
+          "logs:read",
+        ],
+        resource_documentation: "https://junglegrid.dev/docs",
       });
       return;
     }
@@ -85,6 +101,12 @@ async function handleMcpRequest(
   req: IncomingMessage,
   res: ServerResponse,
 ): Promise<void> {
+  const auth = await authenticateMcpRequest(config, req).catch(() => undefined);
+  if (!auth) {
+    writeOAuthChallenge(config, res);
+    return;
+  }
+
   if (req.method !== "POST") {
     writeJson(res, 405, {
       jsonrpc: "2.0",
@@ -94,7 +116,7 @@ async function handleMcpRequest(
     return;
   }
 
-  const server = createMcpServer(config);
+  const server = createMcpServer(config, auth);
   const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
 
   res.on("close", () => {

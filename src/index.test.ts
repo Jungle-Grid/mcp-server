@@ -7,6 +7,9 @@ import type { GatewayConfig } from "./config";
 const config: GatewayConfig = {
   apiBase: "https://api.junglegrid.dev",
   internalServiceToken: "service-token",
+  oauthIssuer: "https://api.junglegrid.dev",
+  resource: "https://mcp.junglegrid.dev",
+  resourceMetadataUrl: "https://mcp.junglegrid.dev/.well-known/oauth-protected-resource",
   nodeEnv: "test",
   port: 0,
 };
@@ -57,12 +60,25 @@ test("unknown routes return 404 JSON", async () => {
   });
 });
 
-test("GET /mcp returns method not allowed", async () => {
-  const response = await invoke("GET", "/mcp");
-  assert.equal(response.statusCode, 405);
+test("GET /.well-known/oauth-protected-resource returns OAuth resource metadata", async () => {
+  const response = await invoke("GET", "/.well-known/oauth-protected-resource");
+  assert.equal(response.statusCode, 200);
   assert.deepEqual(JSON.parse(response.body), {
-    jsonrpc: "2.0",
-    error: { code: -32000, message: "Method not allowed." },
-    id: null,
+    resource: "https://mcp.junglegrid.dev",
+    authorization_servers: ["https://api.junglegrid.dev"],
+    scopes_supported: ["jobs:estimate", "jobs:submit", "jobs:read", "logs:read"],
+    resource_documentation: "https://junglegrid.dev/docs",
+  });
+});
+
+test("GET /mcp without bearer token returns OAuth challenge", async () => {
+  const response = await invoke("GET", "/mcp");
+  assert.equal(response.statusCode, 401);
+  assert.equal(
+    response.headers["WWW-Authenticate"],
+    'Bearer resource_metadata="https://mcp.junglegrid.dev/.well-known/oauth-protected-resource"',
+  );
+  assert.deepEqual(JSON.parse(response.body), {
+    error: { code: "UNAUTHORIZED", message: "Authentication is required." },
   });
 });

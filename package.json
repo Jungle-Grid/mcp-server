@@ -27,7 +27,7 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
-    "test": "npm run build && node --test dist/client.test.js dist/config.test.js dist/tools.test.js dist/index.test.js",
+    "test": "npm run build && node --test dist/auth.test.js dist/client.test.js dist/config.test.js dist/tools.test.js dist/index.test.js",
     "prepublishOnly": "npm run build",
     "start": "node dist/index.js --http"
   },
