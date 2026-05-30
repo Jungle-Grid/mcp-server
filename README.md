@@ -11,6 +11,7 @@ artifacts. Those responsibilities stay in the Jungle Grid API.
 
 - `POST /mcp` - MCP Streamable HTTP endpoint
 - `GET /.well-known/oauth-protected-resource` - OAuth protected resource metadata
+- `GET /.well-known/openai-apps-challenge` - OpenAI Apps domain verification challenge
 - `GET /healthz` - health check
 
 Production URL:
@@ -28,6 +29,7 @@ JUNGLEGRID_INTERNAL_SERVICE_TOKEN=...
 OAUTH_ISSUER=https://api.junglegrid.dev
 MCP_RESOURCE=https://mcp.junglegrid.dev
 MCP_RESOURCE_METADATA_URL=https://mcp.junglegrid.dev/.well-known/oauth-protected-resource
+OPENAI_APPS_CHALLENGE_TOKEN=...
 NODE_ENV=production
 ```
 
@@ -41,6 +43,10 @@ Legacy aliases are still accepted for stdio compatibility:
 
 - `JUNGLE_GRID_API_URL` as an alias for `JUNGLEGRID_API_BASE`
 - `JUNGLE_GRID_API_KEY` as a final auth fallback for local stdio use
+
+`OPENAI_APPS_CHALLENGE_TOKEN` is optional for local development. In production,
+set it to the exact OpenAI developer portal domain-verification token so the
+public unauthenticated challenge endpoint can return it as plain text.
 
 ## Local Development
 
@@ -66,16 +72,17 @@ curl http://localhost:3000/healthz
 
 ## MCP Tools
 
-- `estimate_job` - read-only estimate or execution-plan preparation.
-- `submit_job` - starts real Jungle Grid compute and may cost money.
-- `get_job` - read-only job state lookup.
-- `get_job_logs` - read-only recent log fetch.
-- `cancel_job` - real cancellation action that may stop running compute.
-- `list_artifacts` - read-only managed artifact listing.
-- `get_artifact` - creates a temporary signed artifact download URL.
+- `estimate_job` - estimates routing, capacity source, and expected cost without submitting a workload. Annotations: `readOnlyHint=true`, `openWorldHint=false`, `destructiveHint=false`.
+- `submit_job` - submits a workload for execution and may start managed compute infrastructure and incur usage charges. Annotations: `readOnlyHint=false`, `openWorldHint=true`, `destructiveHint=false`.
+- `get_job` - retrieves status and execution details for an authenticated user's job. Annotations: `readOnlyHint=true`, `openWorldHint=false`, `destructiveHint=false`.
+- `get_job_logs` - retrieves execution logs for an authenticated user's job. Annotations: `readOnlyHint=true`, `openWorldHint=false`, `destructiveHint=false`.
+- `cancel_job` - cancels an existing job and may stop active execution. Annotations: `readOnlyHint=false`, `openWorldHint=true`, `destructiveHint=true`.
+- `list_artifacts` - lists output artifacts associated with a job. Annotations: `readOnlyHint=true`, `openWorldHint=false`, `destructiveHint=false`.
+- `get_artifact` - retrieves temporary download information for an existing output artifact. Annotations: `readOnlyHint=true`, `openWorldHint=false`, `destructiveHint=false`.
 
 All tools return a useful text summary and preserve the raw Jungle Grid API
-response in `structuredContent.data`.
+response in `structuredContent.data`. Each tool also exposes an MCP
+`outputSchema` for that structured content wrapper.
 
 ## Connecting Clients
 
@@ -122,6 +129,7 @@ docker run --rm -p 3000:3000 \
   -e PORT=3000 \
   -e JUNGLEGRID_API_BASE=https://api.junglegrid.dev \
   -e JUNGLEGRID_INTERNAL_SERVICE_TOKEN=... \
+  -e OPENAI_APPS_CHALLENGE_TOKEN=... \
   junglegrid-mcp
 ```
 

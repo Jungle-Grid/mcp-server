@@ -9,11 +9,156 @@ import { hasScope, TOOL_SCOPES, type McpAuthContext } from "./auth.js";
 import * as client from "./client.js";
 import type { GatewayConfig } from "./config.js";
 
+type JsonSchema = Record<string, unknown>;
 type ToolArgs = Record<string, unknown>;
 type HandlerExtra = RequestHandlerExtra<never, never>;
 
 const WORKLOAD_ENUM = ["inference", "training", "fine_tuning", "batch"];
 const ROUTING_MODE_ENUM = ["cost", "speed", "balanced"];
+
+const costRangeSchema = objectSchema({
+  min: { type: "number" },
+  max: { type: "number" },
+}, ["min", "max"]);
+
+const nullableNumberSchema = { anyOf: [{ type: "number" }, { type: "null" }] };
+const nullableBooleanSchema = { anyOf: [{ type: "boolean" }, { type: "null" }] };
+const nullableStringSchema = { anyOf: [{ type: "string" }, { type: "null" }] };
+
+const estimateOutputSchema = wrappedDataSchema(objectSchema({
+  classification: objectSchema({
+    workload_type: { type: "string" },
+    requires_gpu: { type: "boolean" },
+    acceleration_requirement: { type: "string" },
+    confidence: { type: "string" },
+    reasons: { type: "array", items: { type: "string" } },
+  }),
+  routing: objectSchema({
+    route_status: { type: "string" },
+    selected_accelerator: { type: "string" },
+    selected_route_source: { type: "string" },
+    selection_reason: { type: "string" },
+  }),
+  capacity: objectSchema({
+    live_capacity_available: { type: "boolean" },
+    live_candidate_count: { type: "number" },
+    managed_capacity_available: nullableBooleanSchema,
+    managed_profile_count: { type: "number" },
+    estimate_source: { type: "string" },
+  }),
+  estimated_cost_usd: costRangeSchema,
+  estimated_cost_min_usd: { type: "number" },
+  estimated_cost_max_usd: { type: "number" },
+  can_submit: { type: "boolean" },
+  screening: {},
+  available: { type: "boolean" },
+  likely_gpu_type: { type: "string" },
+  routed_gpu_tier: { type: "string" },
+}));
+
+const submitOutputSchema = wrappedDataSchema(objectSchema({
+  job_id: { type: "string" },
+  id: { type: "string" },
+  status: { type: "string" },
+  status_message: { type: "string" },
+  submitted_at: { type: "string" },
+  estimated_cost_usd: costRangeSchema,
+}));
+
+const jobOutputSchema = wrappedDataSchema(objectSchema({
+  job_id: { type: "string" },
+  id: { type: "string" },
+  status: { type: "string" },
+  phase: { type: "string" },
+  status_message: { type: "string" },
+  last_status_update: { type: "string" },
+  estimated_cost_usd: costRangeSchema,
+  actual_cost_usd: nullableNumberSchema,
+  artifacts_ready: { type: "boolean" },
+  account_billing: objectSchema({
+    lifetime_total_spent_usd: { type: "number" },
+  }),
+}));
+
+const logsOutputSchema = wrappedDataSchema(objectSchema({
+  job_id: { type: "string" },
+  logs: {
+    type: "array",
+    items: objectSchema({
+      timestamp: { type: "string" },
+      level: { type: "string" },
+      message: { type: "string" },
+    }, ["message"]),
+  },
+  items: {
+    type: "array",
+    items: objectSchema({
+      timestamp: { type: "string" },
+      level: { type: "string" },
+      message: { type: "string" },
+    }),
+  },
+  next_cursor: nullableStringSchema,
+}));
+
+const cancelOutputSchema = wrappedDataSchema(objectSchema({
+  job_id: { type: "string" },
+  id: { type: "string" },
+  status: { type: "string" },
+  cancelled: { type: "boolean" },
+  message: { type: "string" },
+}));
+
+const artifactsOutputSchema = wrappedDataSchema(objectSchema({
+  job_id: { type: "string" },
+  artifacts: {
+    type: "array",
+    items: objectSchema({
+      name: { type: "string" },
+      filename: { type: "string" },
+      artifact_id: { type: "string" },
+      id: { type: "string" },
+      status: { type: "string" },
+      ready: { type: "boolean" },
+      size_bytes: nullableNumberSchema,
+      mime_type: { type: "string" },
+    }),
+  },
+}));
+
+const artifactOutputSchema = wrappedDataSchema(objectSchema({
+  job_id: { type: "string" },
+  artifact_name: { type: "string" },
+  artifact_id: { type: "string" },
+  ready: { type: "boolean" },
+  size_bytes: nullableNumberSchema,
+  mime_type: { type: "string" },
+  download_url: { type: "string" },
+  expires_at: { type: "string" },
+  artifact: objectSchema({
+    name: { type: "string" },
+    filename: { type: "string" },
+    artifact_id: { type: "string" },
+    id: { type: "string" },
+    status: { type: "string" },
+    ready: { type: "boolean" },
+    size_bytes: nullableNumberSchema,
+    mime_type: { type: "string" },
+  }),
+}));
+
+function objectSchema(properties: Record<string, JsonSchema>, required?: string[]): JsonSchema {
+  return {
+    type: "object",
+    properties,
+    ...(required ? { required } : {}),
+    additionalProperties: true,
+  };
+}
+
+function wrappedDataSchema(dataSchema: JsonSchema): JsonSchema {
+  return objectSchema({ data: dataSchema }, ["data"]);
+}
 
 function result(summary: string, raw: unknown): CallToolResult {
   return {
@@ -238,7 +383,7 @@ export const TOOLS = [
   {
     name: "estimate_job",
     description:
-      "Read-only. Estimate or prepare the best Jungle Grid workload execution plan by calling the Jungle Grid API.",
+      "Estimate routing, capacity source, and expected cost for a proposed Jungle Grid workload without submitting it.",
     inputSchema: {
       type: "object",
       properties: {
@@ -253,11 +398,17 @@ export const TOOLS = [
       },
       required: ["workload"],
     },
+    outputSchema: estimateOutputSchema,
+    annotations: {
+      readOnlyHint: true,
+      openWorldHint: false,
+      destructiveHint: false,
+    },
   },
   {
     name: "submit_job",
     description:
-      "Starts a real Jungle Grid workload for execution. This may launch real compute and may cost money. Use estimate_job first when cost is uncertain.",
+      "Submit a Jungle Grid workload for execution. This may start managed compute infrastructure and incur usage charges.",
     inputSchema: {
       type: "object",
       properties: {
@@ -273,19 +424,31 @@ export const TOOLS = [
       },
       required: ["name", "workload", "image"],
     },
+    outputSchema: submitOutputSchema,
+    annotations: {
+      readOnlyHint: false,
+      openWorldHint: true,
+      destructiveHint: false,
+    },
   },
   {
     name: "get_job",
-    description: "Read-only. Get the current state of a Jungle Grid job.",
+    description: "Retrieve current status and execution details for a specific Jungle Grid job belonging to the authenticated user.",
     inputSchema: {
       type: "object",
       properties: { jobId: { type: "string" } },
       required: ["jobId"],
     },
+    outputSchema: jobOutputSchema,
+    annotations: {
+      readOnlyHint: true,
+      openWorldHint: false,
+      destructiveHint: false,
+    },
   },
   {
     name: "get_job_logs",
-    description: "Read-only. Fetch recent logs for a Jungle Grid job.",
+    description: "Retrieve execution logs for a specific Jungle Grid job belonging to the authenticated user.",
     inputSchema: {
       type: "object",
       properties: {
@@ -295,11 +458,17 @@ export const TOOLS = [
       },
       required: ["jobId"],
     },
+    outputSchema: logsOutputSchema,
+    annotations: {
+      readOnlyHint: true,
+      openWorldHint: false,
+      destructiveHint: false,
+    },
   },
   {
     name: "cancel_job",
     description:
-      "Requests cancellation of a real Jungle Grid job. This is a real action that may stop running compute.",
+      "Cancel an existing Jungle Grid job. This may stop active execution and prevent further outputs.",
     inputSchema: {
       type: "object",
       properties: {
@@ -308,19 +477,31 @@ export const TOOLS = [
       },
       required: ["jobId"],
     },
+    outputSchema: cancelOutputSchema,
+    annotations: {
+      readOnlyHint: false,
+      openWorldHint: true,
+      destructiveHint: true,
+    },
   },
   {
     name: "list_artifacts",
-    description: "Read-only. List managed artifacts uploaded for a Jungle Grid job.",
+    description: "List output artifacts associated with a specific Jungle Grid job.",
     inputSchema: {
       type: "object",
       properties: { jobId: { type: "string" } },
       required: ["jobId"],
     },
+    outputSchema: artifactsOutputSchema,
+    annotations: {
+      readOnlyHint: true,
+      openWorldHint: false,
+      destructiveHint: false,
+    },
   },
   {
     name: "get_artifact",
-    description: "Read-only. Create a temporary signed download URL for a Jungle Grid job artifact.",
+    description: "Retrieve download information for a specific output artifact from a Jungle Grid job.",
     inputSchema: {
       type: "object",
       properties: {
@@ -328,6 +509,12 @@ export const TOOLS = [
         artifactId: { type: "string" },
       },
       required: ["jobId", "artifactId"],
+    },
+    outputSchema: artifactOutputSchema,
+    annotations: {
+      readOnlyHint: true,
+      openWorldHint: false,
+      destructiveHint: false,
     },
   },
 ];

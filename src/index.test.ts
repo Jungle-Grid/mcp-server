@@ -10,6 +10,7 @@ const config: GatewayConfig = {
   oauthIssuer: "https://api.junglegrid.dev",
   resource: "https://mcp.junglegrid.dev",
   resourceMetadataUrl: "https://mcp.junglegrid.dev/.well-known/oauth-protected-resource",
+  openAiAppsChallengeToken: "test-openai-apps-challenge-token",
   nodeEnv: "test",
   port: 0,
 };
@@ -68,6 +69,23 @@ test("GET /.well-known/oauth-protected-resource returns OAuth resource metadata"
     authorization_servers: ["https://api.junglegrid.dev"],
     scopes_supported: ["jobs:estimate", "jobs:submit", "jobs:read", "logs:read"],
     resource_documentation: "https://junglegrid.dev/docs",
+  });
+});
+
+test("GET /.well-known/openai-apps-challenge returns the configured plain-text token without auth", async () => {
+  const response = await invoke("GET", "/.well-known/openai-apps-challenge");
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.headers["Content-Type"], "text/plain; charset=utf-8");
+  assert.equal(response.body, "test-openai-apps-challenge-token");
+});
+
+test("GET /.well-known/openai-apps-challenge returns 404 when no token is configured", async () => {
+  const req = Object.assign(new EventEmitter(), { method: "GET", url: "/.well-known/openai-apps-challenge" });
+  const res = new MockResponse();
+  await handleHttpRequest({ ...config, openAiAppsChallengeToken: undefined }, req as never, res as never);
+  assert.equal(res.statusCode, 404);
+  assert.deepEqual(JSON.parse(res.body), {
+    error: { code: "NOT_FOUND", message: "Not found." },
   });
 });
 

@@ -63,6 +63,15 @@ export async function handleHttpRequest(
       return;
     }
 
+    if (req.method === "GET" && req.url === "/.well-known/openai-apps-challenge") {
+      if (!config.openAiAppsChallengeToken) {
+        writeJson(res, 404, { error: { code: "NOT_FOUND", message: "Not found." } });
+        return;
+      }
+      writeText(res, 200, config.openAiAppsChallengeToken);
+      return;
+    }
+
     if (req.url?.split("?")[0] === "/mcp") {
       await handleMcpRequest(config, req, res);
       return;
@@ -131,6 +140,11 @@ async function handleMcpRequest(
 function writeJson(res: ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, { "Content-Type": "application/json" });
   res.end(JSON.stringify(body));
+}
+
+function writeText(res: ServerResponse, status: number, body: string): void {
+  res.writeHead(status, { "Content-Type": "text/plain; charset=utf-8" });
+  res.end(body);
 }
 
 export async function startServer(env: NodeJS.ProcessEnv = process.env): Promise<void | HttpServer> {

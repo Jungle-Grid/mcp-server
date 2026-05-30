@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  CallToolResultSchema,
   CallToolRequestSchema,
+  ListToolsResultSchema,
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import * as client from "./client";
@@ -90,12 +92,95 @@ function withMockedClient<T>(
   }
 }
 
+const expectedAnnotations: Record<string, { readOnlyHint: boolean; openWorldHint: boolean; destructiveHint: boolean }> = {
+  estimate_job: { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
+  submit_job: { readOnlyHint: false, openWorldHint: true, destructiveHint: false },
+  get_job: { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
+  get_job_logs: { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
+  cancel_job: { readOnlyHint: false, openWorldHint: true, destructiveHint: true },
+  list_artifacts: { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
+  get_artifact: { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
+};
+
+function assertStructuredContentMatchesSchema(toolName: string, structuredContent: unknown): void {
+  const tool = TOOLS.find((item) => item.name === toolName);
+  assert.ok(tool, `tool should exist: ${toolName}`);
+  assert.ok(tool.outputSchema, `tool should define outputSchema: ${toolName}`);
+  validateJsonSchema(tool.outputSchema, structuredContent, toolName);
+}
+
+function validateJsonSchema(schema: unknown, value: unknown, path: string): void {
+  const record = schema && typeof schema === "object" && !Array.isArray(schema)
+    ? schema as Record<string, unknown>
+    : {};
+  if (Object.keys(record).length === 0) return;
+
+  if (Array.isArray(record.anyOf)) {
+    const valid = record.anyOf.some((candidate) => {
+      try {
+        validateJsonSchema(candidate, value, path);
+        return true;
+      } catch {
+        return false;
+      }
+    });
+    assert.ok(valid, `${path} should match one anyOf schema`);
+    return;
+  }
+
+  const type = record.type;
+  if (type === "object") {
+    assert.ok(value && typeof value === "object" && !Array.isArray(value), `${path} should be an object`);
+    const objectValue = value as Record<string, unknown>;
+    for (const required of (record.required as string[] | undefined) ?? []) {
+      assert.ok(Object.prototype.hasOwnProperty.call(objectValue, required), `${path}.${required} is required`);
+    }
+    const properties = record.properties as Record<string, unknown> | undefined;
+    if (properties) {
+      for (const [key, childSchema] of Object.entries(properties)) {
+        if (Object.prototype.hasOwnProperty.call(objectValue, key)) {
+          validateJsonSchema(childSchema, objectValue[key], `${path}.${key}`);
+        }
+      }
+    }
+    return;
+  }
+
+  if (type === "array") {
+    assert.ok(Array.isArray(value), `${path} should be an array`);
+    for (const [index, item] of value.entries()) {
+      validateJsonSchema(record.items, item, `${path}[${index}]`);
+    }
+    return;
+  }
+
+  if (type === "string") {
+    assert.equal(typeof value, "string", `${path} should be a string`);
+    return;
+  }
+
+  if (type === "number") {
+    assert.equal(typeof value, "number", `${path} should be a number`);
+    return;
+  }
+
+  if (type === "boolean") {
+    assert.equal(typeof value, "boolean", `${path} should be a boolean`);
+    return;
+  }
+
+  if (type === "null") {
+    assert.equal(value, null, `${path} should be null`);
+  }
+}
+
 test("tool discovery exposes the gateway tool surface", async () => {
   const server = createRegisteredServer();
   const handler = server.handlers.get(ListToolsRequestSchema);
   assert.ok(handler, "list tools handler should be registered");
 
   const response = await handler({});
+  assert.doesNotThrow(() => ListToolsResultSchema.parse(response));
   assert.deepEqual(response, { tools: TOOLS });
   assert.deepEqual(TOOLS.map((tool) => tool.name), [
     "estimate_job",
@@ -106,6 +191,92 @@ test("tool discovery exposes the gateway tool surface", async () => {
     "list_artifacts",
     "get_artifact",
   ]);
+});
+
+test("tools/list exposes explicit annotations, output schemas, and precise descriptions", async () => {
+  const server = createRegisteredServer();
+  const handler = server.handlers.get(ListToolsRequestSchema);
+  assert.ok(handler, "list tools handler should be registered");
+
+  const response = await handler({}) as { tools: typeof TOOLS };
+  assert.doesNotThrow(() => ListToolsResultSchema.parse(response));
+  for (const tool of response.tools) {
+    assert.deepEqual(tool.annotations, expectedAnnotations[tool.name], `${tool.name} annotations`);
+    assert.ok(tool.outputSchema, `${tool.name} should expose outputSchema`);
+    assert.equal(tool.outputSchema.type, "object", `${tool.name} outputSchema root should be object`);
+    assert.deepEqual(tool.outputSchema.required, ["data"], `${tool.name} outputSchema should require structuredContent.data`);
+  }
+
+  assert.match(response.tools.find((tool) => tool.name === "submit_job")?.description ?? "", /incur usage charges/);
+  assert.match(response.tools.find((tool) => tool.name === "cancel_job")?.description ?? "", /stop active execution/);
+  assert.match(response.tools.find((tool) => tool.name === "estimate_job")?.description ?? "", /without submitting it/);
+});
+
+test("tool annotation policy matches each tool impact", () => {
+  assert.equal(expectedAnnotations.estimate_job.readOnlyHint, true);
+  assert.equal(expectedAnnotations.estimate_job.destructiveHint, false);
+  assert.equal(expectedAnnotations.submit_job.readOnlyHint, false);
+  assert.equal(expectedAnnotations.cancel_job.destructiveHint, true);
+
+  for (const name of ["get_job", "get_job_logs", "list_artifacts", "get_artifact"]) {
+    assert.equal(expectedAnnotations[name].readOnlyHint, true, `${name} should be read-only`);
+    assert.equal(expectedAnnotations[name].destructiveHint, false, `${name} should be non-destructive`);
+  }
+});
+
+test("successful structured tool outputs validate against declared output schemas", async () => {
+  const server = createRegisteredServer();
+
+  await withMockedClient(
+    () => ({
+      estimateJob: async () => ({
+        classification: { workload_type: "batch", requires_gpu: false, reasons: ["small job"] },
+        routing: { route_status: "available", selected_route_source: "live" },
+        capacity: { live_capacity_available: true, live_candidate_count: 1, managed_capacity_available: null },
+        estimated_cost_usd: { min: 0.1, max: 0.2 },
+        can_submit: true,
+      }),
+      submitJob: async () => ({ job_id: "job_123", status: "queued", submitted_at: "2026-05-30T00:00:00Z" }),
+      getJob: async () => ({
+        job_id: "job_123",
+        status: "running",
+        phase: "executing",
+        actual_cost_usd: null,
+        account_billing: { lifetime_total_spent_usd: 12.5 },
+      }),
+      getJobLogs: async () => ({ job_id: "job_123", logs: [{ message: "started", level: "info" }], next_cursor: null }),
+      cancelJob: async () => ({ job_id: "job_123", status: "cancelled", cancelled: true }),
+      listArtifacts: async () => ({
+        job_id: "job_123",
+        artifacts: [{ name: "output.txt", ready: true, size_bytes: 12, mime_type: "text/plain" }],
+      }),
+      getArtifact: async () => ({
+        job_id: "job_123",
+        artifact_name: "output.txt",
+        ready: true,
+        download_url: "https://download.example/output.txt",
+        expires_at: "2026-05-30T00:15:00Z",
+      }),
+    } as never),
+    async () => {
+      const calls: Array<[string, Record<string, unknown>]> = [
+        ["estimate_job", { workload: "batch" }],
+        ["submit_job", { name: "batch-1", workload: "batch", image: "python:3.11-slim" }],
+        ["get_job", { jobId: "job_123" }],
+        ["get_job_logs", { jobId: "job_123" }],
+        ["cancel_job", { jobId: "job_123" }],
+        ["list_artifacts", { jobId: "job_123" }],
+        ["get_artifact", { jobId: "job_123", artifactId: "artifact_1" }],
+      ];
+
+      for (const [toolName, args] of calls) {
+        const response = await callTool(server, toolName, args);
+        assert.equal(response.isError, undefined);
+        assert.doesNotThrow(() => CallToolResultSchema.parse(response));
+        assertStructuredContentMatchesSchema(toolName, response.structuredContent);
+      }
+    },
+  );
 });
 
 test("resolveBearerToken prefers incoming user auth over fallback tokens", () => {

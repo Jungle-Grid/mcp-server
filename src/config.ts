@@ -11,6 +11,7 @@ export interface GatewayConfig {
   oauthIssuer: string;
   resource: string;
   resourceMetadataUrl: string;
+  openAiAppsChallengeToken?: string;
   nodeEnv: string;
   port: number;
 }
@@ -37,6 +38,7 @@ export function resolveGatewayConfig(env: NodeJS.ProcessEnv = process.env): Gate
   const oauthIssuer = ((env.OAUTH_ISSUER ?? "").trim() || DEFAULT_OAUTH_ISSUER).replace(/\/+$/, "");
   const resource = ((env.MCP_RESOURCE ?? "").trim() || DEFAULT_MCP_RESOURCE).replace(/\/+$/, "");
   const resourceMetadataUrl = (env.MCP_RESOURCE_METADATA_URL ?? "").trim() || DEFAULT_MCP_RESOURCE_METADATA_URL;
+  const openAiAppsChallengeToken = (env.OPENAI_APPS_CHALLENGE_TOKEN ?? "").trim() || undefined;
 
   return {
     apiBase: resolveApiBase(env),
@@ -45,6 +47,7 @@ export function resolveGatewayConfig(env: NodeJS.ProcessEnv = process.env): Gate
     oauthIssuer,
     resource,
     resourceMetadataUrl,
+    openAiAppsChallengeToken,
     nodeEnv: (env.NODE_ENV ?? "development").trim() || "development",
     port: resolvePort(env),
   };
