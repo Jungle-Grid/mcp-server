@@ -155,4 +155,7 @@ export interface JobArtifactDownloadResult {
 
 export interface ListJobsResult {
   jobs: Job[];
+  limit?: number;
+  next_cursor?: string;
+  has_more?: boolean;
 }

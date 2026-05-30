@@ -12,6 +12,7 @@ export class JungleGridApiError extends Error {
 export interface JungleGridClient {
   estimateJob(input: unknown): Promise<unknown>;
   submitJob(input: unknown): Promise<unknown>;
+  listJobs(options?: { limit?: number; cursor?: string; status?: string }): Promise<unknown>;
   getJob(jobId: string): Promise<unknown>;
   getJobLogs(jobId: string, options?: { limit?: number; cursor?: string | number }): Promise<unknown>;
   cancelJob(jobId: string, reason?: string): Promise<unknown>;
@@ -32,6 +33,18 @@ export function createJungleGridClient(
     },
     submitJob(input) {
       return request("POST", "/v1/mcp/jobs", input);
+    },
+    listJobs(options = {}) {
+      const params = new URLSearchParams();
+      if (typeof options.limit === "number") params.set("limit", String(options.limit));
+      if (options.cursor !== undefined && options.cursor.trim() !== "") {
+        params.set("cursor", options.cursor.trim());
+      }
+      if (options.status !== undefined && options.status.trim() !== "") {
+        params.set("status", options.status.trim());
+      }
+      const suffix = params.size > 0 ? `?${params.toString()}` : "";
+      return request("GET", `/v1/mcp/jobs${suffix}`);
     },
     getJob(jobId) {
       return request("GET", `/v1/mcp/jobs/${encodeURIComponent(jobId)}`);

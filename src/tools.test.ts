@@ -95,6 +95,7 @@ function withMockedClient<T>(
 const expectedAnnotations: Record<string, { readOnlyHint: boolean; openWorldHint: boolean; destructiveHint: boolean }> = {
   estimate_job: { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
   submit_job: { readOnlyHint: false, openWorldHint: true, destructiveHint: false },
+  list_jobs: { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
   get_job: { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
   get_job_logs: { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
   cancel_job: { readOnlyHint: false, openWorldHint: true, destructiveHint: true },
@@ -185,6 +186,7 @@ test("tool discovery exposes the gateway tool surface", async () => {
   assert.deepEqual(TOOLS.map((tool) => tool.name), [
     "estimate_job",
     "submit_job",
+    "list_jobs",
     "get_job",
     "get_job_logs",
     "cancel_job",
@@ -210,6 +212,7 @@ test("tools/list exposes explicit annotations, output schemas, and precise descr
   assert.match(response.tools.find((tool) => tool.name === "submit_job")?.description ?? "", /incur usage charges/);
   assert.match(response.tools.find((tool) => tool.name === "cancel_job")?.description ?? "", /stop active execution/);
   assert.match(response.tools.find((tool) => tool.name === "estimate_job")?.description ?? "", /without submitting it/);
+  assert.match(response.tools.find((tool) => tool.name === "list_jobs")?.description ?? "", /find recent jobs/);
 });
 
 test("tool annotation policy matches each tool impact", () => {
@@ -218,7 +221,7 @@ test("tool annotation policy matches each tool impact", () => {
   assert.equal(expectedAnnotations.submit_job.readOnlyHint, false);
   assert.equal(expectedAnnotations.cancel_job.destructiveHint, true);
 
-  for (const name of ["get_job", "get_job_logs", "list_artifacts", "get_artifact"]) {
+  for (const name of ["list_jobs", "get_job", "get_job_logs", "list_artifacts", "get_artifact"]) {
     assert.equal(expectedAnnotations[name].readOnlyHint, true, `${name} should be read-only`);
     assert.equal(expectedAnnotations[name].destructiveHint, false, `${name} should be non-destructive`);
   }
@@ -237,6 +240,12 @@ test("successful structured tool outputs validate against declared output schema
         can_submit: true,
       }),
       submitJob: async () => ({ job_id: "job_123", status: "queued", submitted_at: "2026-05-30T00:00:00Z" }),
+      listJobs: async () => ({
+        jobs: [{ job_id: "job_123", status: "running", created_at: "2026-05-30T00:00:00Z" }],
+        limit: 10,
+        next_cursor: null,
+        has_more: false,
+      }),
       getJob: async () => ({
         job_id: "job_123",
         status: "running",
@@ -262,6 +271,7 @@ test("successful structured tool outputs validate against declared output schema
       const calls: Array<[string, Record<string, unknown>]> = [
         ["estimate_job", { workload: "batch" }],
         ["submit_job", { name: "batch-1", workload: "batch", image: "python:3.11-slim" }],
+        ["list_jobs", { limit: 10 }],
         ["get_job", { jobId: "job_123" }],
         ["get_job_logs", { jobId: "job_123" }],
         ["cancel_job", { jobId: "job_123" }],
@@ -397,6 +407,64 @@ test("get_job_logs validates and forwards pagination options", async () => {
   );
 });
 
+test("list_jobs validates and forwards pagination and status options", async () => {
+  const server = createRegisteredServer();
+
+  await withMockedClient(
+    () => ({
+      listJobs: async (options?: { limit?: number; cursor?: string; status?: string }) => {
+        assert.deepEqual(options, { limit: 100, cursor: "10", status: "completed" });
+        return {
+          jobs: [{ job_id: "job_123", status: "completed" }],
+          limit: 100,
+          next_cursor: "110",
+          has_more: true,
+        };
+      },
+    } as never),
+    async () => {
+      const response = await callTool(server, "list_jobs", {
+        limit: 500,
+        cursor: "10",
+        status: "completed",
+      });
+
+      assert.equal(response.content[0]?.text, "Found 1 Jungle Grid job. next_cursor=110.");
+    },
+  );
+});
+
+test("get_job normalizes legacy billing fields before returning structured content", async () => {
+  const server = createRegisteredServer();
+
+  await withMockedClient(
+    () => ({
+      getJob: async () => ({
+        job_id: "job_123",
+        status: "pending",
+        billing: {
+          status: "pending",
+          total_spent_usd: 53.42525,
+        },
+      }),
+    } as never),
+    async () => {
+      const response = await callTool(server, "get_job", { jobId: "job_123" });
+      assert.equal(response.isError, undefined);
+      assert.deepEqual(response.structuredContent, {
+        data: {
+          job_id: "job_123",
+          status: "pending",
+          actual_cost_usd: null,
+          billing: {
+            status: "pending",
+          },
+        },
+      });
+    },
+  );
+});
+
 test("known tool errors are returned as MCP tool errors", async () => {
   const server = createRegisteredServer();
   const response = await callTool(server, "get_job", { jobId: "" });
@@ -423,7 +491,7 @@ test("OAuth tool calls require the tool scope and forward the OAuth token", asyn
     async () => {
       const allowed = await callTool(server, "get_job", { jobId: "job_123" }, "ignored-user-token");
       assert.equal(allowed.isError, undefined);
-      assert.deepEqual(allowed.structuredContent, { data: { job_id: "job_123", status: "queued" } });
+      assert.deepEqual(allowed.structuredContent, { data: { job_id: "job_123", status: "queued", actual_cost_usd: null } });
 
       const denied = await callTool(server, "submit_job", {
         name: "batch-1",

@@ -65,6 +65,24 @@ const submitOutputSchema = wrappedDataSchema(objectSchema({
   estimated_cost_usd: costRangeSchema,
 }));
 
+const listJobsOutputSchema = wrappedDataSchema(objectSchema({
+  jobs: {
+    type: "array",
+    items: objectSchema({
+      job_id: { type: "string" },
+      id: { type: "string" },
+      name: { type: "string" },
+      status: { type: "string" },
+      workload_type: { type: "string" },
+      created_at: { type: "string" },
+      updated_at: { type: "string" },
+    }),
+  },
+  limit: { type: "number" },
+  next_cursor: nullableStringSchema,
+  has_more: { type: "boolean" },
+}));
+
 const jobOutputSchema = wrappedDataSchema(objectSchema({
   job_id: { type: "string" },
   id: { type: "string" },
@@ -340,6 +358,13 @@ function submitSummary(data: unknown): string {
   return `Job submitted and real compute may start. id=${String(id)} status=${String(status)}.`;
 }
 
+function listJobsSummary(data: unknown): string {
+  const record = objectData(data);
+  const jobs = Array.isArray(record.jobs) ? record.jobs.length : 0;
+  const next = record.next_cursor !== undefined ? ` next_cursor=${String(record.next_cursor)}.` : "";
+  return `Found ${jobs} Jungle Grid job${jobs === 1 ? "" : "s"}.${next}`;
+}
+
 function jobSummary(data: unknown): string {
   const record = objectData(data);
   const id = record.job_id ?? record.id ?? "unknown";
@@ -377,6 +402,40 @@ function objectData(data: unknown): Record<string, unknown> {
   return data && typeof data === "object" && !Array.isArray(data)
     ? data as Record<string, unknown>
     : {};
+}
+
+function normalizeJobStatusResponse(data: unknown): unknown {
+  const record = objectData(data);
+  if (Object.keys(record).length === 0) return data;
+
+  const normalized: Record<string, unknown> = { ...record };
+  delete normalized.total_spent_usd;
+
+  const billing = objectData(record.billing);
+  if (Object.keys(billing).length > 0) {
+    const normalizedBilling: Record<string, unknown> = { ...billing };
+    delete normalizedBilling.total_spent_usd;
+
+    if (typeof normalizedBilling.actual_cost_usd !== "number") {
+      if (typeof billing.final_cost_usd === "number") {
+        normalizedBilling.actual_cost_usd = billing.final_cost_usd;
+      } else if (typeof billing.cost_usd === "number") {
+        normalizedBilling.actual_cost_usd = billing.cost_usd;
+      }
+    }
+    delete normalizedBilling.cost_usd;
+    normalized.billing = normalizedBilling;
+
+    if (typeof normalized.actual_cost_usd !== "number") {
+      normalized.actual_cost_usd = typeof normalizedBilling.actual_cost_usd === "number"
+        ? normalizedBilling.actual_cost_usd
+        : null;
+    }
+  } else if (!Object.prototype.hasOwnProperty.call(normalized, "actual_cost_usd")) {
+    normalized.actual_cost_usd = null;
+  }
+
+  return normalized;
 }
 
 export const TOOLS = [
@@ -428,6 +487,24 @@ export const TOOLS = [
     annotations: {
       readOnlyHint: false,
       openWorldHint: true,
+      destructiveHint: false,
+    },
+  },
+  {
+    name: "list_jobs",
+    description: "List the authenticated user's Jungle Grid jobs, optionally filtered by status. Use this to find recent jobs before checking status, logs, or artifacts.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        limit: { type: "number", default: 10 },
+        cursor: { type: "string" },
+        status: { type: "string" },
+      },
+    },
+    outputSchema: listJobsOutputSchema,
+    annotations: {
+      readOnlyHint: true,
+      openWorldHint: false,
       destructiveHint: false,
     },
   },
@@ -544,8 +621,16 @@ export function registerTools(server: Server, config: GatewayConfig, auth?: McpA
         const data = await api.submitJob(buildSubmitInput(args));
         return result(submitSummary(data), data);
       }
+      case "list_jobs": {
+        const data = await api.listJobs({
+          limit: numberInRange(args, "limit", 10, 100),
+          cursor: optionalString(args, "cursor"),
+          status: optionalString(args, "status"),
+        });
+        return result(listJobsSummary(data), data);
+      }
       case "get_job": {
-        const data = await api.getJob(requiredString(args, "jobId"));
+        const data = normalizeJobStatusResponse(await api.getJob(requiredString(args, "jobId")));
         return result(jobSummary(data), data);
       }
       case "get_job_logs": {

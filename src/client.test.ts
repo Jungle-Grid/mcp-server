@@ -58,6 +58,26 @@ test("Jungle Grid client encodes path and query parameters", async () => {
   );
 });
 
+test("Jungle Grid client encodes list jobs query parameters", async () => {
+  const api = createJungleGridClient("https://api.junglegrid.dev", "token-123");
+
+  await withMockedFetch(
+    async (input) => {
+      assert.equal(
+        String(input),
+        "https://api.junglegrid.dev/v1/mcp/jobs?limit=10&cursor=20&status=running",
+      );
+      return Response.json({ jobs: [], limit: 10, has_more: false });
+    },
+    async () => {
+      assert.deepEqual(
+        await api.listJobs({ limit: 10, cursor: "20", status: "running" }),
+        { jobs: [], limit: 10, has_more: false },
+      );
+    },
+  );
+});
+
 test("Jungle Grid client unwraps MCP API envelopes", async () => {
   const api = createJungleGridClient("https://api.junglegrid.dev", "token-123");
 

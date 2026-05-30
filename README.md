@@ -74,14 +74,16 @@ curl http://localhost:3000/healthz
 
 - `estimate_job` - estimates routing, capacity source, and expected cost without submitting a workload. Annotations: `readOnlyHint=true`, `openWorldHint=false`, `destructiveHint=false`.
 - `submit_job` - submits a workload for execution and may start managed compute infrastructure and incur usage charges. Annotations: `readOnlyHint=false`, `openWorldHint=true`, `destructiveHint=false`.
+- `list_jobs` - lists the authenticated user's Jungle Grid jobs, optionally filtered by status, with cursor pagination. Annotations: `readOnlyHint=true`, `openWorldHint=false`, `destructiveHint=false`.
 - `get_job` - retrieves status and execution details for an authenticated user's job. Annotations: `readOnlyHint=true`, `openWorldHint=false`, `destructiveHint=false`.
 - `get_job_logs` - retrieves execution logs for an authenticated user's job. Annotations: `readOnlyHint=true`, `openWorldHint=false`, `destructiveHint=false`.
 - `cancel_job` - cancels an existing job and may stop active execution. Annotations: `readOnlyHint=false`, `openWorldHint=true`, `destructiveHint=true`.
 - `list_artifacts` - lists output artifacts associated with a job. Annotations: `readOnlyHint=true`, `openWorldHint=false`, `destructiveHint=false`.
 - `get_artifact` - retrieves temporary download information for an existing output artifact. Annotations: `readOnlyHint=true`, `openWorldHint=false`, `destructiveHint=false`.
 
-All tools return a useful text summary and preserve the raw Jungle Grid API
-response in `structuredContent.data`. Each tool also exposes an MCP
+All tools return a useful text summary and include the Jungle Grid API response
+in `structuredContent.data`; job status billing fields are normalized to avoid
+confusing account lifetime spend with job-specific cost. Each tool also exposes an MCP
 `outputSchema` for that structured content wrapper.
 
 ## Connecting Clients
