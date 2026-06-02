@@ -1,6 +1,6 @@
 {
   "name": "@jungle-grid/mcp",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "description": "MCP server for Jungle Grid - submit and manage GPU workloads from any MCP-aware AI host",
   "license": "MIT",
   "homepage": "https://github.com/Jungle-Grid/mcp-server#readme",
@@ -48,6 +48,7 @@
     "!dist/*.test.d.ts.map",
     "!dist/*.test.js",
     "!dist/*.test.js.map",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ]
 }
