@@ -155,8 +155,15 @@ docker run --rm -p 3000:3000 \
 
 ## Publishing
 
+Normal users should continue to run the MCP server through the public npmjs
+package:
+
 ```sh
-npm run build
-npm pack --dry-run
-npm publish --access public
+npx -y @jungle-grid/mcp
 ```
+
+Releases are published from GitHub Releases and version tags. The package is
+distributed publicly through npmjs for normal installation, and the same package
+version is also published to GitHub Packages as a repository-linked package
+mirror. GitHub Packages is not the default install path for end users unless a
+specific workflow requires it.
