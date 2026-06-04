@@ -1,127 +1,40 @@
-<div align="center">
-  <a href="https://junglegrid.dev">
-    <img src="./assets/junglegrid-logo.png" alt="Jungle Grid logo" width="128">
-  </a>
+# Jungle Grid MCP Server
 
-  <h1>Jungle Grid MCP Server</h1>
+Run Jungle Grid GPU workloads from MCP-aware AI hosts such as Claude Desktop,
+Cursor, Windsurf, and MCP Inspector.
 
-  <p><strong>Agent-facing MCP tools for submitting, estimating, tracking, and cancelling Jungle Grid workloads.</strong></p>
+The server runs locally over stdio and forwards tool calls to the Jungle Grid
+REST API with your API key.
 
-  <p>
-    <a href="https://mcp.junglegrid.dev/mcp"><img alt="Hosted MCP" src="https://img.shields.io/badge/MCP-hosted_endpoint-111827?style=for-the-badge"></a>
-    <a href="https://www.npmjs.com/package/@jungle-grid/mcp"><img alt="npm package" src="https://img.shields.io/npm/v/@jungle-grid/mcp?style=for-the-badge&color=cb3837&label=npm"></a>
-    <a href="https://junglegrid.dev/docs/mcp"><img alt="MCP docs" src="https://img.shields.io/badge/Read-MCP_docs-2563eb?style=for-the-badge"></a>
-    <a href="https://x.com/jungle_grid"><img alt="Follow Jungle Grid on X" src="https://img.shields.io/badge/Follow-@jungle__grid-000000?style=for-the-badge&logo=x"></a>
-    <a href="https://discord.gg/kpJqxXFFCs"><img alt="Join the Jungle Grid Discord" src="https://img.shields.io/badge/Join-Discord-5865f2?style=for-the-badge&logo=discord&logoColor=white"></a>
-    <a href="mailto:run@junglegrid.dev"><img alt="Email Jungle Grid" src="https://img.shields.io/badge/Email-run@junglegrid.dev-16a34a?style=for-the-badge"></a>
-    <a href="./LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-f97316?style=for-the-badge"></a>
-  </p>
-</div>
+## Requirements
 
-Thin MCP gateway for Jungle Grid. The server exposes agent-facing tools for
-ChatGPT, Cursor, Claude, and other MCP clients, then forwards all real work to
-the main Jungle Grid API.
+- Node.js 18 or newer
+- A Jungle Grid API key
+- Optional: `JUNGLE_GRID_API_URL` for a self-hosted orchestrator
 
-This repo does not schedule jobs, choose providers, calculate billing, or store
-artifacts. Those responsibilities stay in the Jungle Grid API.
+For the full submit workflow, the API key needs `jobs:write`. That scope allows
+estimate, submit, polling, cancellation, and logs for jobs owned by the key's
+account. `list_jobs` still requires `jobs:read`.
 
-## Endpoints
-
-- `POST /mcp` - MCP Streamable HTTP endpoint
-- `GET /.well-known/oauth-protected-resource` - OAuth protected resource metadata
-- `GET /.well-known/openai-apps-challenge` - OpenAI Apps domain verification challenge
-- `GET /healthz` - health check
-
-Production URL:
-
-```text
-https://mcp.junglegrid.dev/mcp
-```
-
-## Environment
+## Quick Start
 
 ```sh
-PORT=3000
-JUNGLEGRID_API_BASE=https://api.junglegrid.dev
-JUNGLEGRID_INTERNAL_SERVICE_TOKEN=...
-OAUTH_ISSUER=https://api.junglegrid.dev
-MCP_RESOURCE=https://mcp.junglegrid.dev
-MCP_RESOURCE_METADATA_URL=https://mcp.junglegrid.dev/.well-known/oauth-protected-resource
-OPENAI_APPS_CHALLENGE_TOKEN=...
-NODE_ENV=production
+JUNGLE_GRID_API_KEY=jg_... npx -y @jungle-grid/mcp
 ```
 
-Hosted HTTP MCP requires `Authorization: Bearer <OAuth access token>`. The server
-introspects that token with the Jungle Grid API, enforces tool scopes, and
-forwards the user token to the API. `JUNGLEGRID_INTERNAL_SERVICE_TOKEN` is used
-only for MCP-to-API introspection and other internal server-to-server calls; it
-is not used as the ChatGPT user identity.
+On Windows PowerShell:
 
-Legacy aliases are still accepted for stdio compatibility:
-
-- `JUNGLE_GRID_API_URL` as an alias for `JUNGLEGRID_API_BASE`
-- `JUNGLE_GRID_API_KEY` as a final auth fallback for local stdio use
-
-`OPENAI_APPS_CHALLENGE_TOKEN` is optional for local development. In production,
-set it to the exact OpenAI developer portal domain-verification token so the
-public unauthenticated challenge endpoint can return it as plain text.
-
-## Local Development
-
-```sh
-npm install
-npm test
-npm run build
+```powershell
+$env:JUNGLE_GRID_API_KEY = "jg_..."
+npx -y @jungle-grid/mcp
 ```
 
-Run the hosted HTTP server:
+The server uses stdio, so a successful manual launch appears to wait for MCP
+messages. If `JUNGLE_GRID_API_KEY` is missing, it exits with a clear error.
 
-```sh
-JUNGLEGRID_API_BASE=https://api.junglegrid.dev \
-JUNGLEGRID_INTERNAL_SERVICE_TOKEN=... \
-npm start
-```
+## Claude Desktop
 
-Then check:
-
-```sh
-curl http://localhost:3000/healthz
-```
-
-## MCP Tools
-
-- `estimate_job` - estimates routing, capacity source, and expected cost without submitting a workload. Annotations: `readOnlyHint=true`, `openWorldHint=false`, `destructiveHint=false`.
-- `submit_job` - submits a workload for execution and may start managed compute infrastructure and incur usage charges. Annotations: `readOnlyHint=false`, `openWorldHint=true`, `destructiveHint=false`.
-- `list_jobs` - lists the authenticated user's Jungle Grid jobs, optionally filtered by status, with cursor pagination. Annotations: `readOnlyHint=true`, `openWorldHint=false`, `destructiveHint=false`.
-- `get_job` - retrieves status and execution details for an authenticated user's job. Annotations: `readOnlyHint=true`, `openWorldHint=false`, `destructiveHint=false`.
-- `get_job_logs` - retrieves execution logs for an authenticated user's job. Annotations: `readOnlyHint=true`, `openWorldHint=false`, `destructiveHint=false`.
-- `cancel_job` - cancels an existing job and may stop active execution. Annotations: `readOnlyHint=false`, `openWorldHint=true`, `destructiveHint=true`.
-- `list_artifacts` - lists output artifacts associated with a job. Annotations: `readOnlyHint=true`, `openWorldHint=false`, `destructiveHint=false`.
-- `get_artifact` - retrieves temporary download information for an existing output artifact. Annotations: `readOnlyHint=true`, `openWorldHint=false`, `destructiveHint=false`.
-
-All tools return a useful text summary and include the Jungle Grid API response
-in `structuredContent.data`; job status billing fields are normalized to avoid
-confusing account lifetime spend with job-specific cost. Each tool also exposes an MCP
-`outputSchema` for that structured content wrapper.
-
-## Connecting Clients
-
-For hosted MCP clients that support Streamable HTTP, use:
-
-```text
-https://mcp.junglegrid.dev/mcp
-```
-
-ChatGPT and other hosted clients should discover auth from
-`/.well-known/oauth-protected-resource`, connect the user's Jungle Grid account,
-and then send the OAuth access token as `Authorization: Bearer ...`.
-
-## Claude Desktop / Cursor Stdio Compatibility
-
-The package still supports local stdio mode for existing MCP host configs. The
-bin defaults to stdio; `npm start` and Docker use HTTP mode.
-
-Claude Desktop example:
+Add this to `claude_desktop_config.json`, then fully restart Claude Desktop.
 
 ```json
 {
@@ -130,7 +43,6 @@ Claude Desktop example:
       "command": "npx",
       "args": ["-y", "@jungle-grid/mcp"],
       "env": {
-        "JUNGLEGRID_API_BASE": "https://api.junglegrid.dev",
         "JUNGLE_GRID_API_KEY": "jg_..."
       }
     }
@@ -138,32 +50,153 @@ Claude Desktop example:
 }
 ```
 
-For Cursor project configs, avoid committing secrets. Put the token in the
-environment used to launch Cursor and keep checked-in config secret-free.
+Windows config path:
 
-## Docker
+```text
+%APPDATA%\Claude\claude_desktop_config.json
+```
+
+macOS config path:
+
+```text
+~/Library/Application Support/Claude/claude_desktop_config.json
+```
+
+## Cursor or Project MCP Config
+
+For a checked-in project config, avoid committing secrets. Put the API key in
+the environment used to launch Cursor and keep the config secret-free.
+
+```json
+{
+  "mcpServers": {
+    "junglegrid": {
+      "command": "npx",
+      "args": ["-y", "@jungle-grid/mcp"]
+    }
+  }
+}
+```
+
+For a local, uncommitted config, you can include the key directly:
+
+```json
+{
+  "mcpServers": {
+    "junglegrid": {
+      "command": "npx",
+      "args": ["-y", "@jungle-grid/mcp"],
+      "env": {
+        "JUNGLE_GRID_API_KEY": "jg_..."
+      }
+    }
+  }
+}
+```
+
+## Self-Hosted Orchestrator
+
+`JUNGLE_GRID_API_URL` defaults to
+`https://api.junglegrid.dev`. Override it when your host should
+call a different orchestrator.
+
+```json
+{
+  "mcpServers": {
+    "junglegrid": {
+      "command": "npx",
+      "args": ["-y", "@jungle-grid/mcp"],
+      "env": {
+        "JUNGLE_GRID_API_KEY": "jg_...",
+        "JUNGLE_GRID_API_URL": "https://your-orchestrator.example.com"
+      }
+    }
+  }
+}
+```
+
+## Tools
+
+- `estimate_job`: estimate GPU tier, region, duration, and credit cost.
+- `submit_job`: submit an asynchronous GPU workload with optional `environment` values.
+- `upload_job_input`: create a signed upload slot for input files or scripts.
+- `list_job_inputs`: list uploaded inputs and their mount paths.
+- `get_job`: fetch current job status and details.
+- `list_jobs`: list recent jobs for the authenticated account.
+- `cancel_job`: cancel a pending, queued, or running job.
+- `get_job_logs`: fetch paginated logs with `cursor`, `limit`, and `tail`.
+- `stream_job_logs`: stream live logs until completion or timeout.
+- `list_job_artifacts`: list managed artifacts uploaded for a job.
+- `get_artifact_download_url`: create a signed download URL for one managed artifact.
+
+## Real-Time Job Pattern
+
+Use `upload_job_input` for files, `submit_job` to start work, `stream_job_logs` for live output, then
+`list_job_artifacts` after completion to retrieve saved files.
+
+```json
+{
+  "command": ["python", "-c", "import os; exec(os.environ['CODE'])"],
+  "environment": {
+    "CODE": "import os, json\nos.makedirs('/workspace/artifacts', exist_ok=True)\nwith open('/workspace/artifacts/output.json','w') as f:\n    json.dump({'status':'ok'}, f)"
+  }
+}
+```
+
+The combined command args limit is 4096 characters. For larger scripts, upload
+the script with `upload_job_input` using `kind: "script"`, pass its `input_id`
+as `script_file`, and invoke `/workspace/scripts/<filename>` from `command`.
+
+For file-based workloads such as transcription:
+
+```json
+{
+  "command": ["python", "/workspace/scripts/transcribe.py", "/workspace/inputs/audio.ogg", "/workspace/artifacts/transcript.txt"],
+  "script_file": "inp_script123",
+  "input_files": ["inp_audio123"],
+  "expected_artifacts": ["/workspace/artifacts/transcript.txt"]
+}
+```
+
+For managed jobs, Jungle Grid automatically creates `/workspace/artifacts` and
+uploads any regular files written there. Users do not need to create signed
+upload URLs or call artifact completion endpoints manually.
+
+## Local Development
 
 ```sh
-docker build -t junglegrid-mcp .
-docker run --rm -p 3000:3000 \
-  -e PORT=3000 \
-  -e JUNGLEGRID_API_BASE=https://api.junglegrid.dev \
-  -e JUNGLEGRID_INTERNAL_SERVICE_TOKEN=... \
-  -e OPENAI_APPS_CHALLENGE_TOKEN=... \
-  junglegrid-mcp
+npm install
+npm run build
+JUNGLE_GRID_API_KEY=jg_... node dist/index.js
+```
+
+Inspect the server with MCP Inspector:
+
+```sh
+JUNGLE_GRID_API_KEY=jg_... npx @modelcontextprotocol/inspector node dist/index.js
 ```
 
 ## Publishing
 
-Normal users should continue to run the MCP server through the public npmjs
-package:
+Verify the package before publishing:
 
 ```sh
-npx -y @jungle-grid/mcp
+npm run build
+npm pack --dry-run
 ```
 
-Releases are published from GitHub Releases and version tags. The package is
-distributed publicly through npmjs for normal installation, and the same package
-version is also published to GitHub Packages as a repository-linked package
-mirror. GitHub Packages is not the default install path for end users unless a
-specific workflow requires it.
+Publish the scoped package publicly:
+
+```sh
+npm publish --access public
+```
+
+## Troubleshooting
+
+- `JUNGLE_GRID_API_KEY environment variable is required`: add the key to the
+  host config `env` block or to the environment that launches the host.
+- Tools do not appear: fully quit and reopen the MCP host after editing config.
+- Old package version: pin a version in config, for example
+  `["@jungle-grid/mcp@0.1.0"]`, or clear the npx cache.
+- API calls fail: confirm the key is valid and `JUNGLE_GRID_API_URL` points to
+  the orchestrator you intend to use.
