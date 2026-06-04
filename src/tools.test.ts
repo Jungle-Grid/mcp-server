@@ -95,6 +95,8 @@ function withMockedClient<T>(
 const expectedAnnotations: Record<string, { readOnlyHint: boolean; openWorldHint: boolean; destructiveHint: boolean }> = {
   estimate_job: { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
   submit_job: { readOnlyHint: false, openWorldHint: true, destructiveHint: false },
+  upload_job_input: { readOnlyHint: false, openWorldHint: true, destructiveHint: false },
+  list_job_inputs: { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
   list_jobs: { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
   get_job: { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
   get_job_logs: { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
@@ -186,6 +188,8 @@ test("tool discovery exposes the gateway tool surface", async () => {
   assert.deepEqual(TOOLS.map((tool) => tool.name), [
     "estimate_job",
     "submit_job",
+    "upload_job_input",
+    "list_job_inputs",
     "list_jobs",
     "get_job",
     "get_job_logs",
@@ -221,7 +225,7 @@ test("tool annotation policy matches each tool impact", () => {
   assert.equal(expectedAnnotations.submit_job.readOnlyHint, false);
   assert.equal(expectedAnnotations.cancel_job.destructiveHint, true);
 
-  for (const name of ["list_jobs", "get_job", "get_job_logs", "list_artifacts", "get_artifact"]) {
+  for (const name of ["list_job_inputs", "list_jobs", "get_job", "get_job_logs", "list_artifacts", "get_artifact"]) {
     assert.equal(expectedAnnotations[name].readOnlyHint, true, `${name} should be read-only`);
     assert.equal(expectedAnnotations[name].destructiveHint, false, `${name} should be non-destructive`);
   }
@@ -240,6 +244,20 @@ test("successful structured tool outputs validate against declared output schema
         can_submit: true,
       }),
       submitJob: async () => ({ job_id: "job_123", status: "queued", submitted_at: "2026-05-30T00:00:00Z" }),
+      uploadJobInput: async () => ({
+        upload: {
+          input_id: "inp_123",
+          filename: "audio.wav",
+          method: "PUT",
+          upload_url: "https://upload.example",
+          token: "token",
+          expires_at: "2026-05-30T00:15:00Z",
+          complete_url: "/v1/job-inputs/inp_123/complete",
+        },
+      }),
+      listJobInputs: async () => ({
+        inputs: [{ input_id: "inp_123", filename: "audio.wav", kind: "input", status: "uploaded", ready: true, mount_path: "/workspace/inputs/audio.wav" }],
+      }),
       listJobs: async () => ({
         jobs: [{ job_id: "job_123", status: "running", created_at: "2026-05-30T00:00:00Z" }],
         limit: 10,
@@ -271,6 +289,8 @@ test("successful structured tool outputs validate against declared output schema
       const calls: Array<[string, Record<string, unknown>]> = [
         ["estimate_job", { workload: "batch" }],
         ["submit_job", { name: "batch-1", workload: "batch", image: "python:3.11-slim" }],
+        ["upload_job_input", { filename: "audio.wav", content_type: "audio/wav", kind: "input" }],
+        ["list_job_inputs", {}],
         ["list_jobs", { limit: 10 }],
         ["get_job", { jobId: "job_123" }],
         ["get_job_logs", { jobId: "job_123" }],
@@ -336,6 +356,9 @@ test("submit_job maps gateway inputs to the Jungle Grid API payload", () => {
       command: "python",
       args: ["train.py"],
       env: { EPOCHS: "3" },
+      input_files: ["inp_audio"],
+      script_file: "inp_script",
+      expected_artifacts: ["/workspace/artifacts/transcript.txt"],
       routing_mode: "balanced",
       metadata: { source: "mcp" },
     }),
@@ -346,6 +369,9 @@ test("submit_job maps gateway inputs to the Jungle Grid API payload", () => {
       command: "python",
       args: ["train.py"],
       environment: { EPOCHS: "3" },
+      input_files: ["inp_audio"],
+      script_file: "inp_script",
+      expected_artifacts: ["/workspace/artifacts/transcript.txt"],
       optimize_for: "balanced",
       metadata: { source: "mcp" },
     },

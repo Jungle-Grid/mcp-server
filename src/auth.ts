@@ -22,6 +22,8 @@ interface IntrospectionResponse {
 export const TOOL_SCOPES: Record<string, string> = {
   estimate_job: "jobs:estimate",
   submit_job: "jobs:submit",
+  upload_job_input: "jobs:submit",
+  list_job_inputs: "jobs:read",
   list_jobs: "jobs:read",
   get_job: "jobs:read",
   get_job_logs: "logs:read",
