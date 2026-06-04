@@ -26,6 +26,7 @@ export const TOOL_SCOPES: Record<string, string> = {
   list_job_inputs: "jobs:read",
   list_jobs: "jobs:read",
   get_job: "jobs:read",
+  get_job_events: "jobs:read",
   get_job_logs: "logs:read",
   cancel_job: "jobs:submit",
   list_artifacts: "jobs:read",

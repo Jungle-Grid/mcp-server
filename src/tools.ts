@@ -88,14 +88,42 @@ const jobOutputSchema = wrappedDataSchema(objectSchema({
   id: { type: "string" },
   status: { type: "string" },
   phase: { type: "string" },
+  execution_phase: { type: "string" },
   status_message: { type: "string" },
   last_status_update: { type: "string" },
+  phase_started_at: { type: "string" },
+  wait_duration_seconds: { type: "number" },
+  delayed_start: { type: "boolean" },
+  delay_reason: objectSchema({
+    code: { type: "string" },
+    message: { type: "string" },
+  }),
+  scheduling: {},
   estimated_cost_usd: costRangeSchema,
   actual_cost_usd: nullableNumberSchema,
   artifacts_ready: { type: "boolean" },
   account_billing: objectSchema({
     lifetime_total_spent_usd: { type: "number" },
   }),
+}));
+
+const eventsOutputSchema = wrappedDataSchema(objectSchema({
+  job_id: { type: "string" },
+  status: { type: "string" },
+  phase: { type: "string" },
+  items: {
+    type: "array",
+    items: objectSchema({
+      id: { type: "string" },
+      type: { type: "string" },
+      phase: { type: "string" },
+      title: { type: "string" },
+      message: { type: "string" },
+      source: { type: "string" },
+      level: { type: "string" },
+      created_at: { type: "string" },
+    }, ["id", "title", "message", "created_at"]),
+  },
 }));
 
 const logsOutputSchema = wrappedDataSchema(objectSchema({
@@ -117,6 +145,9 @@ const logsOutputSchema = wrappedDataSchema(objectSchema({
     }),
   },
   next_cursor: nullableStringSchema,
+  has_more: { type: "boolean" },
+  failure_highlight: { type: "string" },
+  usage_hint: { type: "string" },
 }));
 
 const cancelOutputSchema = wrappedDataSchema(objectSchema({
@@ -400,14 +431,30 @@ function jobSummary(data: unknown): string {
   const record = objectData(data);
   const id = record.job_id ?? record.id ?? "unknown";
   const status = record.status ?? "unknown";
-  return `Job ${String(id)} is ${String(status)}.`;
+  const phase = record.execution_phase ?? record.phase;
+  const delay = objectData(record.delay_reason);
+  const delayed = record.delayed_start === true && delay.message
+    ? ` Delayed start: ${String(delay.message)}`
+    : "";
+  return `Job ${String(id)} is ${String(status)}${phase ? ` (${String(phase)})` : ""}.${delayed}`;
+}
+
+function eventsSummary(data: unknown): string {
+  const record = objectData(data);
+  const items = Array.isArray(record.items) ? record.items.length : 0;
+  const latest = Array.isArray(record.items) && record.items.length > 0
+    ? objectData(record.items[record.items.length - 1])
+    : {};
+  const suffix = latest.title ? ` Latest: ${String(latest.title)}.` : "";
+  return `Fetched ${items} lifecycle event${items === 1 ? "" : "s"}.${suffix}`;
 }
 
 function logsSummary(data: unknown): string {
   const record = objectData(data);
   const items = Array.isArray(record.items) ? record.items.length : 0;
   const next = record.next_cursor !== undefined ? ` next_cursor=${String(record.next_cursor)}.` : "";
-  return `Fetched ${items} log entr${items === 1 ? "y" : "ies"}.${next}`;
+  const hint = typeof record.usage_hint === "string" && record.usage_hint ? ` ${record.usage_hint}` : "";
+  return `Fetched ${items} log entr${items === 1 ? "y" : "ies"}.${next}${hint}`;
 }
 
 function cancelSummary(data: unknown, jobId: string): string {
@@ -603,7 +650,7 @@ export const TOOLS = [
   },
   {
     name: "get_job",
-    description: "Retrieve current status and execution details for a specific Jungle Grid job belonging to the authenticated user.",
+    description: "Retrieve current status, execution phase, scheduling delay, routing, failure, and artifact contract details for a specific Jungle Grid job.",
     inputSchema: {
       type: "object",
       properties: { jobId: { type: "string" } },
@@ -617,8 +664,23 @@ export const TOOLS = [
     },
   },
   {
+    name: "get_job_events",
+    description: "Retrieve platform lifecycle events for a job, including scheduling and startup events that can appear before workload logs exist.",
+    inputSchema: {
+      type: "object",
+      properties: { jobId: { type: "string" } },
+      required: ["jobId"],
+    },
+    outputSchema: eventsOutputSchema,
+    annotations: {
+      readOnlyHint: true,
+      openWorldHint: false,
+      destructiveHint: false,
+    },
+  },
+  {
     name: "get_job_logs",
-    description: "Retrieve execution logs for a specific Jungle Grid job belonging to the authenticated user.",
+    description: "Retrieve paginated workload logs for a job. If logs are empty while a job is queued/starting, call get_job_events for platform scheduling events.",
     inputSchema: {
       type: "object",
       properties: {
@@ -737,6 +799,10 @@ export function registerTools(server: Server, config: GatewayConfig, auth?: McpA
       case "get_job": {
         const data = normalizeJobStatusResponse(await api.getJob(requiredString(args, "jobId")));
         return result(jobSummary(data), data);
+      }
+      case "get_job_events": {
+        const data = await api.getJobEvents(requiredString(args, "jobId"));
+        return result(eventsSummary(data), data);
       }
       case "get_job_logs": {
         const data = await api.getJobLogs(requiredString(args, "jobId"), {
