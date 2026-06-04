@@ -166,8 +166,13 @@ upload URLs or call artifact completion endpoints manually.
 `estimate_job` can return `screening.can_submit: true` without confirmed
 immediate worker pickup. Check `capacity_status` for whether capacity is
 `available`, `limited`, `unavailable`, or `unknown`. After submission, `get_job`
-returns `execution_phase`, `scheduling`, and `delayed_start`; call
-`get_job_events` when workload logs are empty but the job is still scheduling.
+returns `execution_phase`, stable `phase_started_at`, later
+`phase_last_updated_at`, `scheduling`, and `delayed_start`. A delayed start is
+phase-specific: waiting for compatible capacity is different from managed
+runtime preparation after a container is already running. A supported estimate
+does not guarantee immediate or successful runtime startup; call
+`get_job_events` when workload logs are empty but the job is still scheduling or
+preparing.
 
 ## Local Development
 

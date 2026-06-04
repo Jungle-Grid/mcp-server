@@ -92,6 +92,7 @@ const jobOutputSchema = wrappedDataSchema(objectSchema({
   status_message: { type: "string" },
   last_status_update: { type: "string" },
   phase_started_at: { type: "string" },
+  phase_last_updated_at: { type: "string" },
   wait_duration_seconds: { type: "number" },
   delayed_start: { type: "boolean" },
   delay_reason: objectSchema({
@@ -434,9 +435,12 @@ function jobSummary(data: unknown): string {
   const phase = record.execution_phase ?? record.phase;
   const delay = objectData(record.delay_reason);
   const delayed = record.delayed_start === true && delay.message
-    ? ` Delayed start: ${String(delay.message)}`
+    ? ` Delayed in current phase: ${String(delay.message)}`
     : "";
-  return `Job ${String(id)} is ${String(status)}${phase ? ` (${String(phase)})` : ""}.${delayed}`;
+  const timing = record.phase_started_at
+    ? ` phase_started_at=${String(record.phase_started_at)}${record.phase_last_updated_at ? ` phase_last_updated_at=${String(record.phase_last_updated_at)}` : ""}`
+    : "";
+  return `Job ${String(id)} is ${String(status)}${phase ? ` (${String(phase)})` : ""}.${timing}${delayed}`;
 }
 
 function eventsSummary(data: unknown): string {
@@ -650,7 +654,7 @@ export const TOOLS = [
   },
   {
     name: "get_job",
-    description: "Retrieve current status, execution phase, scheduling delay, routing, failure, and artifact contract details for a specific Jungle Grid job.",
+    description: "Retrieve current status, execution phase, stable phase-entry timing, latest provider/platform update timing, scheduling delay, routing, failure, and artifact contract details for a specific Jungle Grid job. phase_started_at is when the job first entered the current normalized phase; phase_last_updated_at is later provider/platform progress or heartbeat when present; delayed_start identifies a prolonged wait in the actual current phase. A supported estimate does not guarantee immediate or successful runtime startup.",
     inputSchema: {
       type: "object",
       properties: { jobId: { type: "string" } },

@@ -477,6 +477,15 @@ test("get_job normalizes legacy billing fields before returning structured conte
       getJob: async () => ({
         job_id: "job_123",
         status: "pending",
+        execution_phase: "runtime_preparation",
+        phase_started_at: "2026-06-04T10:00:00Z",
+        phase_last_updated_at: "2026-06-04T10:06:30Z",
+        wait_duration_seconds: 390,
+        delayed_start: true,
+        delay_reason: {
+          code: "RUNTIME_PREPARATION_DELAYED",
+          message: "The managed runtime has been preparing for more than 5 minutes. The workload command has not started yet.",
+        },
         billing: {
           status: "pending",
           total_spent_usd: 53.42525,
@@ -490,12 +499,24 @@ test("get_job normalizes legacy billing fields before returning structured conte
         data: {
           job_id: "job_123",
           status: "pending",
+          execution_phase: "runtime_preparation",
+          phase_started_at: "2026-06-04T10:00:00Z",
+          phase_last_updated_at: "2026-06-04T10:06:30Z",
+          wait_duration_seconds: 390,
+          delayed_start: true,
+          delay_reason: {
+            code: "RUNTIME_PREPARATION_DELAYED",
+            message: "The managed runtime has been preparing for more than 5 minutes. The workload command has not started yet.",
+          },
           actual_cost_usd: null,
           billing: {
             status: "pending",
           },
         },
       });
+      assert.match(response.content[0]?.text ?? "", /phase_started_at=2026-06-04T10:00:00Z/);
+      assert.match(response.content[0]?.text ?? "", /phase_last_updated_at=2026-06-04T10:06:30Z/);
+      assert.match(response.content[0]?.text ?? "", /Delayed in current phase/);
     },
   );
 });
