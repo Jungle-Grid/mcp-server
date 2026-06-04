@@ -122,17 +122,18 @@ call a different orchestrator.
 - `upload_job_input`: create a signed upload slot for input files or scripts.
 - `list_job_inputs`: list uploaded inputs and their mount paths.
 - `get_job`: fetch current job status and details.
+- `get_job_events`: fetch platform lifecycle events, including scheduling/startup events before workload logs exist.
 - `list_jobs`: list recent jobs for the authenticated account.
 - `cancel_job`: cancel a pending, queued, or running job.
 - `get_job_logs`: fetch paginated logs with `cursor`, `limit`, and `tail`.
-- `stream_job_logs`: stream live logs until completion or timeout.
-- `list_job_artifacts`: list managed artifacts uploaded for a job.
-- `get_artifact_download_url`: create a signed download URL for one managed artifact.
+- `list_artifacts`: list managed artifacts uploaded for a job.
+- `get_artifact`: create a signed download URL for one managed artifact.
 
 ## Real-Time Job Pattern
 
-Use `upload_job_input` for files, `submit_job` to start work, `stream_job_logs` for live output, then
-`list_job_artifacts` after completion to retrieve saved files.
+Use `upload_job_input` for files, `submit_job` to start work, `get_job_events`
+while the job is queued or starting, `get_job_logs` once workload output exists,
+then `list_artifacts` after completion to retrieve saved files.
 
 ```json
 {
@@ -161,6 +162,12 @@ For file-based workloads such as transcription:
 For managed jobs, Jungle Grid automatically creates `/workspace/artifacts` and
 uploads any regular files written there. Users do not need to create signed
 upload URLs or call artifact completion endpoints manually.
+
+`estimate_job` can return `screening.can_submit: true` without confirmed
+immediate worker pickup. Check `capacity_status` for whether capacity is
+`available`, `limited`, `unavailable`, or `unknown`. After submission, `get_job`
+returns `execution_phase`, `scheduling`, and `delayed_start`; call
+`get_job_events` when workload logs are empty but the job is still scheduling.
 
 ## Local Development
 

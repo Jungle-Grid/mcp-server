@@ -14,6 +14,7 @@ export interface JungleGridClient {
   submitJob(input: unknown): Promise<unknown>;
   listJobs(options?: { limit?: number; cursor?: string; status?: string }): Promise<unknown>;
   getJob(jobId: string): Promise<unknown>;
+  getJobEvents(jobId: string): Promise<unknown>;
   getJobLogs(jobId: string, options?: { limit?: number; cursor?: string | number }): Promise<unknown>;
   uploadJobInput(input: { filename: string; content_type?: string; kind?: string }): Promise<unknown>;
   listJobInputs(): Promise<unknown>;
@@ -50,6 +51,9 @@ export function createJungleGridClient(
     },
     getJob(jobId) {
       return request("GET", `/v1/mcp/jobs/${encodeURIComponent(jobId)}`);
+    },
+    getJobEvents(jobId) {
+      return request("GET", `/v1/jobs/${encodeURIComponent(jobId)}/events`);
     },
     getJobLogs(jobId, options = {}) {
       const params = new URLSearchParams();
