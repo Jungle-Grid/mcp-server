@@ -125,6 +125,9 @@ const eventsOutputSchema = wrappedDataSchema(objectSchema({
       source: { type: "string" },
       level: { type: "string" },
       created_at: { type: "string" },
+      occurred_at: { type: "string" },
+      recorded_at: { type: "string" },
+      sequence: { type: "number" },
     }, ["id", "title", "message", "created_at"]),
   },
 }));
@@ -136,6 +139,9 @@ const logsOutputSchema = wrappedDataSchema(objectSchema({
     items: objectSchema({
       timestamp: { type: "string" },
       level: { type: "string" },
+      category: { type: "string" },
+      source: { type: "string" },
+      stream: { type: "string" },
       message: { type: "string" },
     }, ["message"]),
   },
@@ -144,6 +150,9 @@ const logsOutputSchema = wrappedDataSchema(objectSchema({
     items: objectSchema({
       timestamp: { type: "string" },
       level: { type: "string" },
+      category: { type: "string" },
+      source: { type: "string" },
+      stream: { type: "string" },
       message: { type: "string" },
     }),
   },
@@ -724,7 +733,7 @@ export const TOOLS = [
   },
   {
     name: "get_job_logs",
-    description: "Retrieve paginated workload logs for a job. If logs are empty while a job is queued/starting, call get_job_events for platform scheduling events.",
+    description: "Retrieve paginated job logs. Entries include category so platform/runtime logs can be distinguished from workload_stdout/workload_stderr. If workload logs are empty while a job is queued/starting, call get_job_events for platform scheduling events.",
     inputSchema: {
       type: "object",
       properties: {

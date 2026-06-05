@@ -438,6 +438,58 @@ test("get_job_logs validates and forwards pagination options", async () => {
   );
 });
 
+test("get_job_logs preserves log categories in structured content", async () => {
+  const server = createRegisteredServer();
+
+  await withMockedClient(
+    () => ({
+      getJobLogs: async () => ({
+        job_id: "job_123",
+        items: [
+          { message: "Container is running", category: "platform", source: "managed-fleet", stream: "stderr" },
+          { message: "hello", category: "workload_stdout", source: "app-stdout", stream: "stdout" },
+        ],
+        startup_diagnostics: {
+          command_spawned: true,
+          workload_logs_available: true,
+        },
+      }),
+    } as never),
+    async () => {
+      const response = await callTool(server, "get_job_logs", { jobId: "job_123" });
+
+      const data = response.structuredContent?.data as { items?: Array<{ category?: string }> } | undefined;
+      assert.equal(data?.items?.[0]?.category, "platform");
+      assert.equal(data?.items?.[1]?.category, "workload_stdout");
+    },
+  );
+});
+
+test("get_job_events preserves authoritative ordering fields", async () => {
+  const server = createRegisteredServer();
+
+  await withMockedClient(
+    () => ({
+      getJobEvents: async () => ({
+        job_id: "job_123",
+        items: [
+          { id: "started", title: "Started", message: "started", created_at: "2026-06-04T10:00:07Z", occurred_at: "2026-06-04T10:00:07Z", recorded_at: "2026-06-04T10:00:08Z", sequence: 70 },
+          { id: "completed", title: "Completed", message: "done", created_at: "2026-06-04T10:00:07Z", occurred_at: "2026-06-04T10:00:07Z", recorded_at: "2026-06-04T10:00:09Z", sequence: 100 },
+        ],
+      }),
+    } as never),
+    async () => {
+      const response = await callTool(server, "get_job_events", { jobId: "job_123" });
+
+      const data = response.structuredContent?.data as { items?: Array<{ sequence?: number; occurred_at?: string; recorded_at?: string }> } | undefined;
+      assert.equal(data?.items?.[0]?.sequence, 70);
+      assert.equal(data?.items?.[1]?.sequence, 100);
+      assert.equal(data?.items?.[1]?.occurred_at, "2026-06-04T10:00:07Z");
+      assert.equal(data?.items?.[1]?.recorded_at, "2026-06-04T10:00:09Z");
+    },
+  );
+});
+
 test("list_jobs validates and forwards pagination and status options", async () => {
   const server = createRegisteredServer();
 
