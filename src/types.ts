@@ -1,4 +1,4 @@
-export type WorkloadType = "inference" | "training" | "fine-tuning" | "batch";
+export type WorkloadType = "inference" | "training" | "fine_tuning" | "fine-tuning" | "batch";
 export type OptimizeFor = "balanced" | "cost" | "speed";
 export type Priority = "low" | "balanced" | "high";
 export type GPUClass = "consumer" | "datacenter";
@@ -96,7 +96,7 @@ export interface SubmitJobInput {
   name?: string;
   workload_type: WorkloadType;
   image: string;
-  command?: string;
+  command?: string[];
   args?: string[];
   model_size_gb?: number;
   disk_gb?: number;
@@ -107,6 +107,9 @@ export interface SubmitJobInput {
   environment?: Record<string, string>;
   huggingface_credential_id?: string;
   webhook_url?: string;
+  input_files?: Array<{ input_id: string }>;
+  script_files?: Array<{ input_id: string }>;
+  expected_artifacts?: string[];
 }
 
 export interface SubmitJobResult {

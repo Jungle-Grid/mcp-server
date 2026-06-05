@@ -24,6 +24,8 @@ const costRangeSchema = objectSchema({
 const nullableNumberSchema = { anyOf: [{ type: "number" }, { type: "null" }] };
 const nullableBooleanSchema = { anyOf: [{ type: "boolean" }, { type: "null" }] };
 const nullableStringSchema = { anyOf: [{ type: "string" }, { type: "null" }] };
+const commandArraySchema = { type: "array", items: { type: "string" } };
+const inputReferenceSchema = objectSchema({ input_id: { type: "string" } }, ["input_id"]);
 
 const estimateOutputSchema = wrappedDataSchema(objectSchema({
   classification: objectSchema({
@@ -361,14 +363,50 @@ function toApiWorkload(workload: string): string {
   return workload === "fine_tuning" ? "fine-tuning" : workload;
 }
 
+function workloadTypeValue(args: ToolArgs, required = false): string | undefined {
+  const canonical = enumValue(args, "workload_type", WORKLOAD_ENUM, false);
+  if (canonical) return canonical;
+  const legacy = enumValue(args, "workload", WORKLOAD_ENUM, false);
+  if (legacy) return legacy;
+  if (required) throw new Error("workload_type is required.");
+  return undefined;
+}
+
+function commandValue(args: ToolArgs): string[] | string | undefined {
+  const value = args.command;
+  if (value === undefined || value === null) return undefined;
+  if (Array.isArray(value)) return optionalStringArray(args, "command");
+  if (typeof value === "string") return optionalString(args, "command");
+  throw new Error("command must be an array of strings.");
+}
+
+function inputReferenceArray(args: ToolArgs, key: string): Array<{ input_id: string }> | undefined {
+  const value = args[key];
+  if (value === undefined || value === null) return undefined;
+  if (!Array.isArray(value)) throw new Error(`${key} must be an array of { input_id } objects.`);
+  return value.map((item) => {
+    if (typeof item === "string") {
+      const inputID = item.trim();
+      if (!inputID) throw new Error(`${key} items must include input_id.`);
+      return { input_id: inputID };
+    }
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      throw new Error(`${key} must be an array of { input_id } objects.`);
+    }
+    const inputID = optionalString(item as ToolArgs, "input_id");
+    if (!inputID) throw new Error(`${key} items must include input_id.`);
+    return { input_id: inputID };
+  });
+}
+
 export function buildEstimateInput(args: ToolArgs): Record<string, unknown> {
-  const workload = enumValue(args, "workload", WORKLOAD_ENUM, true) as string;
+  const workload = workloadTypeValue(args, true) as string;
   const input: Record<string, unknown> = {
     workload_type: toApiWorkload(workload),
   };
   copyIfDefined(input, "model_size_gb", optionalNumber(args, "model_size"));
   copyIfDefined(input, "image", optionalString(args, "image"));
-  copyIfDefined(input, "command", optionalString(args, "command"));
+  copyIfDefined(input, "command", commandValue(args));
   copyIfDefined(input, "args", optionalStringArray(args, "args"));
   copyIfDefined(input, "optimize_for", enumValue(args, "routing_mode", ROUTING_MODE_ENUM));
   copyIfDefined(input, "template", optionalString(args, "template"));
@@ -377,16 +415,17 @@ export function buildEstimateInput(args: ToolArgs): Record<string, unknown> {
 }
 
 export function buildSubmitInput(args: ToolArgs): Record<string, unknown> {
-  const workload = enumValue(args, "workload", WORKLOAD_ENUM, true) as string;
+  const workload = workloadTypeValue(args, true) as string;
   const input: Record<string, unknown> = {
     name: requiredString(args, "name"),
     workload_type: toApiWorkload(workload),
     image: requiredString(args, "image"),
   };
-  copyIfDefined(input, "command", optionalString(args, "command"));
+  copyIfDefined(input, "command", commandValue(args));
   copyIfDefined(input, "args", optionalStringArray(args, "args"));
   copyIfDefined(input, "environment", optionalStringRecord(args, "env"));
-  copyIfDefined(input, "input_files", optionalStringArray(args, "input_files"));
+  copyIfDefined(input, "input_files", inputReferenceArray(args, "input_files"));
+  copyIfDefined(input, "script_files", inputReferenceArray(args, "script_files"));
   copyIfDefined(input, "script_file", optionalString(args, "script_file"));
   copyIfDefined(input, "expected_artifacts", optionalStringArray(args, "expected_artifacts"));
   copyIfDefined(input, "optimize_for", enumValue(args, "routing_mode", ROUTING_MODE_ENUM));
@@ -542,16 +581,16 @@ export const TOOLS = [
     inputSchema: {
       type: "object",
       properties: {
-        workload: { type: "string", enum: WORKLOAD_ENUM },
+        workload_type: { type: "string", enum: WORKLOAD_ENUM },
         model_size: { type: "number", description: "Optional model size in GB." },
         image: { type: "string" },
-        command: { type: "string" },
+        command: commandArraySchema,
         args: { type: "array", items: { type: "string" } },
         routing_mode: { type: "string", enum: ROUTING_MODE_ENUM },
         template: { type: "string" },
         notes: { type: "string" },
       },
-      required: ["workload"],
+      required: ["workload_type"],
     },
     outputSchema: estimateOutputSchema,
     annotations: {
@@ -568,19 +607,20 @@ export const TOOLS = [
       type: "object",
       properties: {
         name: { type: "string" },
-        workload: { type: "string", enum: WORKLOAD_ENUM },
+        workload_type: { type: "string", enum: WORKLOAD_ENUM },
         image: { type: "string" },
-        command: { type: "string" },
+        command: commandArraySchema,
         args: { type: "array", items: { type: "string" } },
         env: { type: "object", additionalProperties: { type: "string" } },
         input_files: {
           type: "array",
-          items: { type: "string" },
-          description: "Uploaded input IDs to mount under /workspace/inputs/<filename>.",
+          items: inputReferenceSchema,
+          description: "Uploaded input references to mount under /workspace/inputs/<filename>.",
         },
-        script_file: {
-          type: "string",
-          description: "Uploaded script input ID to mount under /workspace/scripts/<filename>.",
+        script_files: {
+          type: "array",
+          items: inputReferenceSchema,
+          description: "Uploaded script references to mount under /workspace/scripts/<filename>.",
         },
         expected_artifacts: {
           type: "array",
@@ -591,7 +631,7 @@ export const TOOLS = [
         template: { type: "string" },
         metadata: { type: "object" },
       },
-      required: ["name", "workload", "image"],
+      required: ["name", "workload_type", "image"],
     },
     outputSchema: submitOutputSchema,
     annotations: {

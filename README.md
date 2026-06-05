@@ -146,15 +146,19 @@ then `list_artifacts` after completion to retrieve saved files.
 
 The combined command args limit is 4096 characters. For larger scripts, upload
 the script with `upload_job_input` using `kind: "script"`, pass its `input_id`
-as `script_file`, and invoke `/workspace/scripts/<filename>` from `command`.
+as `script_files: [{"input_id":"..."}]`, and invoke
+`/workspace/scripts/<filename>` from `command`.
 
 For file-based workloads such as transcription:
 
 ```json
 {
+  "name": "audio-transcription",
+  "workload_type": "inference",
+  "image": "python:3.11-slim",
   "command": ["python", "/workspace/scripts/transcribe.py", "/workspace/inputs/audio.ogg", "/workspace/artifacts/transcript.txt"],
-  "script_file": "inp_script123",
-  "input_files": ["inp_audio123"],
+  "script_files": [{ "input_id": "inp_script123" }],
+  "input_files": [{ "input_id": "inp_audio123" }],
   "expected_artifacts": ["/workspace/artifacts/transcript.txt"]
 }
 ```
@@ -173,6 +177,11 @@ runtime preparation after a container is already running. A supported estimate
 does not guarantee immediate or successful runtime startup; call
 `get_job_events` when workload logs are empty but the job is still scheduling or
 preparing.
+
+The deprecated tool argument `workload` is accepted as a temporary alias for
+`workload_type`, and legacy string file IDs are normalized where possible. New
+requests should use `workload_type`, `command` arrays, and `{ "input_id": "..." }`
+file references.
 
 ## Local Development
 
