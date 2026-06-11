@@ -6,7 +6,7 @@ MCP-compatible agents that have the `junglegrid` server enabled.
 ## Estimate a Job Before Submission
 
 ```text
-Estimate the cost of running a batch job with image nvidia/cuda:12.2.0-base-ubuntu22.04 and command ["bash","-lc","python train.py --epochs 3"]. Optimise for cost and prefer us-east if possible.
+Estimate the cost of running a batch job with image nvidia/cuda:12.2.0-base-ubuntu22.04 and command ["bash","-lc","python train.py --epochs 3"]. Use routing_mode "cost" and explain whether the estimate confirms immediate capacity or only supported/provisionable capacity.
 ```
 
 ## Submit a Managed Batch Job
@@ -18,25 +18,25 @@ Submit a batch job named "mnist-train" using image pytorch/pytorch:2.2.0-cuda12.
 ## Check Job Status
 
 ```text
-Check the status of Jungle Grid job job_123. Summarise whether it is still queued, running, or finished and include any scheduling reason if available.
+Check the status of Jungle Grid job job_123. Summarise the current status, execution phase, phase timing, delayed-start reason, scheduling details, and artifact readiness if available.
 ```
 
-## Stream Live Logs
+## Inspect Lifecycle Events
 
 ```text
-Stream live logs for Jungle Grid job job_123 for up to 180 seconds. Show stdout, stderr, and tell me whether the process exited cleanly.
+Fetch lifecycle events for Jungle Grid job job_123. Explain what happened before workload logs began, including queueing, route selection, scheduling, provisioning, startup, retry, failure, or cancellation events.
 ```
 
-## Retrieve Final Logs
+## Retrieve Workload Logs
 
 ```text
-Fetch the final runtime logs for Jungle Grid job job_123. If stdout or stderr is unavailable, explain why from the runtime metadata.
+Fetch persisted workload logs for Jungle Grid job job_123. If no workload logs are available yet, also fetch lifecycle events and explain whether the job is still queued, scheduling, provisioning, or preparing runtime.
 ```
 
 ## Failure Analysis
 
 ```text
-Inspect Jungle Grid job job_123. Get the latest status, fetch runtime logs, and explain the most likely reason the workload failed.
+Inspect Jungle Grid job job_123. Get the latest status, lifecycle events, persisted logs, and artifact list. Explain the most likely failure stage and whether there are retry, cancellation, or artifact clues.
 ```
 
 ## Inspect Managed Artifacts
@@ -49,4 +49,10 @@ List managed artifacts for Jungle Grid job job_123. If files are available, get 
 
 ```text
 Submit a batch job with image python:3.11-slim and command ["python","-c","import os; print('hello from jungle grid')"]. Use the most cost-effective routing that is currently available.
+```
+
+## Submit a File-Backed Job
+
+```text
+Create upload slots for transcribe.py as a script and audio.ogg as an input. After I upload and complete both files, submit an inference job that runs python /workspace/scripts/transcribe.py /workspace/inputs/audio.ogg /workspace/artifacts/transcript.txt, then monitor events, status, logs, and retrieve the transcript artifact.
 ```
