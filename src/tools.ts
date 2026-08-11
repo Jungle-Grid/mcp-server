@@ -16,11 +16,6 @@ type HandlerExtra = RequestHandlerExtra<never, never>;
 const WORKLOAD_ENUM = ["inference", "training", "fine_tuning", "batch"];
 const ROUTING_MODE_ENUM = ["cost", "speed", "balanced"];
 
-const costRangeSchema = objectSchema({
-  min: { type: "number" },
-  max: { type: "number" },
-}, ["min", "max"]);
-
 const nullableNumberSchema = { anyOf: [{ type: "number" }, { type: "null" }] };
 const nullableBooleanSchema = { anyOf: [{ type: "boolean" }, { type: "null" }] };
 const nullableStringSchema = { anyOf: [{ type: "string" }, { type: "null" }] };
@@ -48,7 +43,7 @@ const estimateOutputSchema = wrappedDataSchema(objectSchema({
     managed_profile_count: { type: "number" },
     estimate_source: { type: "string" },
   }),
-  estimated_cost_usd: costRangeSchema,
+  estimated_cost_usd: { type: "number" },
   estimated_cost_min_usd: { type: "number" },
   estimated_cost_max_usd: { type: "number" },
   can_submit: { type: "boolean" },
@@ -64,7 +59,7 @@ const submitOutputSchema = wrappedDataSchema(objectSchema({
   status: { type: "string" },
   status_message: { type: "string" },
   submitted_at: { type: "string" },
-  estimated_cost_usd: costRangeSchema,
+  estimated_cost_usd: { type: "number" },
 }));
 
 const listJobsOutputSchema = wrappedDataSchema(objectSchema({
@@ -102,7 +97,7 @@ const jobOutputSchema = wrappedDataSchema(objectSchema({
     message: { type: "string" },
   }),
   scheduling: {},
-  estimated_cost_usd: costRangeSchema,
+  estimated_cost_usd: { type: "number" },
   actual_cost_usd: nullableNumberSchema,
   artifacts_ready: { type: "boolean" },
   account_billing: objectSchema({
@@ -430,6 +425,7 @@ export function buildSubmitInput(args: ToolArgs): Record<string, unknown> {
     workload_type: toApiWorkload(workload),
     image: requiredString(args, "image"),
   };
+  copyIfDefined(input, "model_size_gb", optionalNumber(args, "model_size"));
   copyIfDefined(input, "command", commandValue(args));
   copyIfDefined(input, "args", optionalStringArray(args, "args"));
   copyIfDefined(input, "environment", optionalStringRecord(args, "env"));
@@ -618,6 +614,7 @@ export const TOOLS = [
         name: { type: "string" },
         workload_type: { type: "string", enum: WORKLOAD_ENUM },
         image: { type: "string" },
+        model_size: { type: "number", description: "Optional model size in GB used to select GPU capacity." },
         command: commandArraySchema,
         args: { type: "array", items: { type: "string" } },
         env: { type: "object", additionalProperties: { type: "string" } },

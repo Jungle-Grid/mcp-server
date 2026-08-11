@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import {
   CallToolResultSchema,
   CallToolRequestSchema,
@@ -242,7 +245,7 @@ test("successful structured tool outputs validate against declared output schema
         classification: { workload_type: "batch", requires_gpu: false, reasons: ["small job"] },
         routing: { route_status: "available", selected_route_source: "live" },
         capacity: { live_capacity_available: true, live_candidate_count: 1, managed_capacity_available: null },
-        estimated_cost_usd: { min: 0.1, max: 0.2 },
+        estimated_cost_usd: 0.15,
         can_submit: true,
       }),
       submitJob: async () => ({ job_id: "job_123", status: "queued", submitted_at: "2026-05-30T00:00:00Z" }),
@@ -318,6 +321,37 @@ test("successful structured tool outputs validate against declared output schema
   );
 });
 
+test("official MCP SDK accepts scalar estimated cost from estimate_job", async () => {
+  const server = new Server({ name: "junglegrid-test", version: "0.0.0" }, { capabilities: { tools: {} } });
+  registerTools(server, config);
+  const mcpClient = new Client({ name: "junglegrid-test-client", version: "0.0.0" });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await Promise.all([server.connect(serverTransport), mcpClient.connect(clientTransport)]);
+
+  try {
+    await withMockedClient(
+      () => ({
+        estimateJob: async () => ({
+          available: true,
+          estimated_cost_usd: 0.15,
+          estimated_cost_min_usd: 0.1,
+          estimated_cost_max_usd: 0.2,
+        }),
+      }) as never,
+      async () => {
+        const response = await mcpClient.callTool({
+          name: "estimate_job",
+          arguments: { workload_type: "batch", model_size: 7 },
+        });
+        assert.equal((response.structuredContent as { data?: { estimated_cost_usd?: number } })?.data?.estimated_cost_usd, 0.15);
+      },
+    );
+  } finally {
+    await mcpClient.close();
+    await server.close();
+  }
+});
+
 test("resolveBearerToken prefers incoming user auth over fallback tokens", () => {
   assert.equal(
     resolveBearerToken(
@@ -360,6 +394,7 @@ test("submit_job maps gateway inputs to the Jungle Grid API payload", () => {
       name: "mnist-train",
       workload_type: "training",
       image: "pytorch/pytorch:2.2.0-cuda12.1-cudnn8-runtime",
+      model_size: 7,
       command: ["python", "train.py"],
       env: { EPOCHS: "3" },
       input_files: [{ input_id: "inp_audio" }],
@@ -372,6 +407,7 @@ test("submit_job maps gateway inputs to the Jungle Grid API payload", () => {
       name: "mnist-train",
       workload_type: "training",
       image: "pytorch/pytorch:2.2.0-cuda12.1-cudnn8-runtime",
+      model_size_gb: 7,
       command: ["python", "train.py"],
       environment: { EPOCHS: "3" },
       input_files: [{ input_id: "inp_audio" }],

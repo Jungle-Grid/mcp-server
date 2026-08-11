@@ -173,7 +173,7 @@ The current tool registry exposes these exact tool names:
 | Tool | Purpose | Required parameters | Optional parameters |
 | --- | --- | --- | --- |
 | `estimate_job` | Estimate routing, capacity source, and expected cost without creating work. | `workload_type` | `model_size`, `image`, `command`, `args`, `routing_mode`, `template`, `notes` |
-| `submit_job` | Submit a workload. This may start compute and incur usage charges. | `name`, `workload_type`, `image` | `command`, `args`, `env`, `input_files`, `script_files`, `script_file`, `expected_artifacts`, `routing_mode`, `template`, `metadata` |
+| `submit_job` | Submit a workload. This may start compute and incur usage charges. | `name`, `workload_type`, `image` | `model_size`, `command`, `args`, `env`, `input_files`, `script_files`, `script_file`, `expected_artifacts`, `routing_mode`, `template`, `metadata` |
 | `upload_job_input` | Create a signed upload slot for an input file or script. | `filename` | `content_type`, `kind` |
 | `list_job_inputs` | List uploaded inputs and scripts for the authenticated account. | none | none |
 | `list_jobs` | List recent jobs. | none | `limit`, `cursor`, `status` |
@@ -207,7 +207,7 @@ Common errors: missing `workload_type`, invalid enum value, authentication failu
 
 #### `submit_job`
 
-Creates an asynchronous job. `command` is preferably an array of strings. `env` must be an object with string values and is forwarded as REST `environment`. `input_files` and `script_files` accept arrays of `{ "input_id": "..." }`; string IDs are normalized for compatibility. The current REST implementation supports one uploaded script reference.
+Creates an asynchronous job. `model_size` is an optional size in GB used to select suitable GPU capacity and is forwarded as REST `model_size_gb`. `command` is preferably an array of strings. `env` must be an object with string values and is forwarded as REST `environment`. `input_files` and `script_files` accept arrays of `{ "input_id": "..." }`; string IDs are normalized for compatibility. The current REST implementation supports one uploaded script reference.
 
 Expected response includes `job_id`, `status`, `queued_at` or `submitted_at`, routing fields, input/script details, and artifact contract fields when returned by the API.
 
@@ -217,6 +217,7 @@ Common errors: missing `name`, `image`, or `workload_type`; invalid workload typ
 {
   "name": "transcribe-audio",
   "workload_type": "inference",
+  "model_size": 7,
   "image": "python:3.11-slim",
   "command": ["python", "/workspace/scripts/transcribe.py", "/workspace/inputs/audio.ogg", "/workspace/artifacts/transcript.txt"],
   "script_files": [{ "input_id": "inp_script123" }],
